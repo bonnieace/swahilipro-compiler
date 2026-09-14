@@ -1,83 +1,10 @@
-import time
+"""Legacy shell entrypoint.
 
-try:
-    import swahilipro.swahilipro as swahilipro
-except ImportError:
-    import swahilipro
-
-ascii_art = [
-    [
-        "   ____",
-        " / ___|",
-        "| |___ ",
-        " \\___ \\",
-        "  ___)|",
-        " |____/"
-    ],
-    [
-        "  _    _ ",
-        " | |  | |",
-        " | |  | |",
-        " | |/\\| |",
-        " \\  /\\  /",
-        "  \\/  \\/ "
-    ],
-    [
-        "   ____   ",
-        "  / __ \\ ",
-        " / / _` |",
-        "| | (_| |",
-        " \\ \\__,_|",
-        "  \\____/ "
-    ],
-    [
-        "_      ",
-        "| |     ",
-        "| |___  ",
-        "|  __ | ",
-        "| | | | ",
-        "|_| |_| "
-    ],
-    [
-        " _  ",
-        "| | ",
-        "| | ",
-        "| | ",
-        "| | ",
-        "|_| "
-    ],
-    [
-        " _    ",
-        "| |   ",
-        "| |   ",
-        "| |   ",
-        "| |__ ",
-        "|____|"
-    ],
-    [
-        " _  ",
-        "| | ",
-        "| | ",
-        "| | ",
-        "| | ",
-        "|_| "
-    ]
-]
+The canonical CLI is now `swa`. Keeping this module lets older launchers continue
+to open the same REPL without maintaining a second shell implementation.
+"""
+from swa_cli import repl
 
 
-def print_ascii_art(art):
-    for i in range(len(art[0])):
-        line = "".join([art[j][i] for j in range(len(art))])
-        print(line)
-        time.sleep(0.1)
-
-
-print_ascii_art(ascii_art)
-while True:
-    text = input("SWAHILI > ")
-    result, error = swahilipro.run("<stdin>", text)
-
-    if error:
-        print(error.as_string())
-    elif result is not None:
-        print(result)
+if __name__ == "__main__":
+    raise SystemExit(repl())
