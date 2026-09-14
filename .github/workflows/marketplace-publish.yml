@@ -1,0 +1,115 @@
+name: Publish VS Code Marketplace
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+    secrets:
+      VSCE_PAT:
+        required: true
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Existing GitHub release version without the v prefix, for example 2.0.0"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: marketplace-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        target:
+          - darwin-arm64
+          - darwin-x64
+          - linux-x64
+          - win32-x64
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Validate release
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid version '$VERSION'." >&2
+            exit 1
+          fi
+          TAG="v${VERSION}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+
+      - name: Download platform VSIX from GitHub Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p publish
+          gh release download "${{ steps.release.outputs.tag }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "swahilipro-${{ matrix.target }}.vsix" \
+            --dir publish
+          test -f "publish/swahilipro-${{ matrix.target }}.vsix"
+
+      - name: Install Marketplace publisher
+        run: npm install --global @vscode/vsce@3.6.0
+
+      - name: Publish with retries
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${VSCE_PAT:-}" ]; then
+            echo "VSCE_PAT is not configured." >&2
+            exit 1
+          fi
+
+          VSIX="publish/swahilipro-${{ matrix.target }}.vsix"
+          MAX_ATTEMPTS=4
+          ATTEMPT=1
+
+          while [ "$ATTEMPT" -le "$MAX_ATTEMPTS" ]; do
+            echo "Publishing $VSIX (attempt $ATTEMPT/$MAX_ATTEMPTS)"
+            set +e
+            OUTPUT="$(vsce publish --packagePath "$VSIX" --pat "$VSCE_PAT" 2>&1)"
+            STATUS=$?
+            set -e
+            printf '%s\n' "$OUTPUT"
+
+            if [ "$STATUS" -eq 0 ]; then
+              echo "Published ${{ matrix.target }} successfully."
+              exit 0
+            fi
+
+            if printf '%s\n' "$OUTPUT" | grep -Eiq 'already.*(exist|publish)|version .* (exists|published)'; then
+              echo "This platform/version is already on the Marketplace; treating it as success."
+              exit 0
+            fi
+
+            if [ "$ATTEMPT" -eq "$MAX_ATTEMPTS" ]; then
+              echo "Publishing ${{ matrix.target }} failed after $MAX_ATTEMPTS attempts." >&2
+              exit "$STATUS"
+            fi
+
+            WAIT_SECONDS=$((15 * (1 << (ATTEMPT - 1))))
+            echo "Retrying in ${WAIT_SECONDS}s..."
+            sleep "$WAIT_SECONDS"
+            ATTEMPT=$((ATTEMPT + 1))
+          done
