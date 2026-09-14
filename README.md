@@ -1,155 +1,258 @@
-# Swahili Programming Language Documentation
+# SwahiliPro
 
-## Table of Contents
-- [1. Variables (Vigezo)](#1-variables-vigezo)
-- [2. Arithmetic Operations (Operesheni za Hisabati)](#2-arithmetic-operations-operesheni-za-hisabati)
-- [3. Control Structures (Miundo ya Kudhibiti)](#3-control-structures-miundo-ya-kudhibiti)
-- [4. Functions (Njia)](#4-functions-njia)
-- [5. Logical Operators (Operesheni za Mantiki)](#5-logical-operators-operesheni-za-mantiki)
-- [6. Comparison Operators (Operesheni za Kulinganisha)](#6-comparison-operators-operesheni-za-kulinganisha)
-- [7. Input and Output (Ingizo na Tokeo)](#7-input-and-output-ingizo-na-tokeo)
-- [8. Exponentiation (Karisimu)](#8-exponentiation-karisimu)
-- [9. Comments (Maelezo ya Pembeni)](#9-comments-maelezo-ya-pembeni)
+SwahiliPro is a Swahili-first programming language designed to feel familiar to people who have seen modern languages while keeping readable language constructs in Swahili.
 
-## 1. Variables (Vigezo)
+This branch introduces the **SwahiliPro v2 syntax**. The main design rule is simple:
 
-Variables are declared using the `var` keyword.
+> Keep universal programming structure familiar; use Swahili for the human-readable parts.
+
+## Quick example
 
 ```swahili
-var jina = "Habari"
-var idadi = 10
+mraba(x) => x * x
+
+wastani(a, b, c) {
+    acha jumla = a + b + c
+    rudisha jumla / 3
+}
+
+acha jina = "Amina"
+acha umri = 17
+
+ikiwa (umri >= 18) {
+    andika(jina + ": mtu mzima")
+}
+au ikiwa (umri >= 13) {
+    andika(jina + ": kijana")
+}
+vinginevyo {
+    andika(jina + ": mtoto")
+}
+
+kwa i katika 1..5 {
+    andika(mraba(i))
+}
 ```
 
-### String Operations
+## Variables
+
+Declare a variable with `acha`:
+
 ```swahili
-var salamu = "Habari" + " Dunia"
-andika(salamu)  # Habari Dunia
+acha jina = "Amina"
+acha umri = 24
+acha bei = 150
 ```
 
-### Number Operations
+After declaration, assign normally:
+
 ```swahili
-var x = 5
-var y = 10
-var jumla = x + y
-andika(jumla)  # 15
+umri = 25
 ```
 
-## 2. Arithmetic Operations (Operesheni za Hisabati)
+## Functions
 
-| Operator | Description | Symbol |
-|----------|-------------|---------|
-| + | Addition | Ongeza |
-| - | Subtraction | Toa |
-| * | Multiplication | Mara |
-| / | Division | Gawa |
-| ^ | Exponentiation | Karisimu |
+SwahiliPro v2 does not require a function-definition keyword.
+
+### Block function
 
 ```swahili
-var a = 5
-var b = 2
-var matokeo = a * b
-print(matokeo)  # 10
+jumlisha(a, b) {
+    rudisha a + b
+}
 ```
 
-## 3. Control Structures (Miundo ya Kudhibiti)
+### Expression function
 
-### If Statements (Ikiwa)
 ```swahili
-ikiwa condition basi
-    # Code block
-ikiwa_nyingine
-    # Else block
-funga
+jumlisha(a, b) => a + b
 ```
 
-### Else If (Au Ikiwa)
+Calling a function remains conventional:
+
 ```swahili
-ikiwa condition basi
-    # First condition
-au_ikiwa condition basi
-    # Second condition
-ikiwa_nyingine
-    # Fallback
-funga
+acha jibu = jumlisha(5, 10)
 ```
 
-### For Loops (Kwa)
+## Conditions
+
+Canonical v2 style uses parentheses around conditions and braces around blocks:
+
 ```swahili
-kwa var i = start hadi end basi
-    # Loop body
-funga
+ikiwa (alama >= 80) {
+    andika("Bora")
+}
+au ikiwa (alama >= 70) {
+    andika("Vizuri")
+}
+vinginevyo {
+    andika("Endelea kujitahidi")
+}
 ```
 
-### While Loops (Wakati)
+Single-line blocks are valid:
+
 ```swahili
-wakati condition basi
-    # Loop body
-funga
+ikiwa (umri >= 18) { andika("Mtu mzima") }
 ```
 
-## 4. Functions (Njia)
+## Boolean logic
 
 ```swahili
-njia function_name(parameters) basi
-    # Function body
-    rudisha value
-funga
+kweli
+uongo
+na
+au
+sio
 ```
 
 Example:
-```swahili
-njia ongeza(a, b) basi
-    rudisha a + b
-funga
-```
-
-## 5. Logical Operators (Operesheni za Mantiki)
-
-- `na`: Logical AND
-- `au`: Logical OR
 
 ```swahili
-ikiwa a == 5 na b == 10 basi
-    print("Zote ni kweli")
-funga
+ikiwa (ana_kitambulisho na sio amezuiwa) {
+    andika("Ruhusiwa")
+}
 ```
 
-## 6. Comparison Operators (Operesheni za Kulinganisha)
+## Loops
 
-| Operator | Description | Symbol |
-|----------|-------------|---------|
-| == | Equal to | Ni Sawa |
-| != | Not equal to | Si Sawa |
-| < | Less than | Ndogo Zaidi |
-| > | Greater than | Kubwa Zaidi |
-| <= | Less than or equal to | Ndogo Zaidi au Sawa |
-| >= | Greater than or equal to | Kubwa Zaidi au Sawa |
-
-## 7. Input and Output (Ingizo na Tokeo)
-
-### Output
-```swahili
-print("Habari Dunia")
-```
-
-### Input
-```swahili
-var jina = ingiza("Jina lako ni nani? ")
-andika("Habari, " + jina)
-```
-
-## 8. Exponentiation (Karisimu)
+### Iterate over a collection
 
 ```swahili
-var matokeo = 2 ^ 3  # 2 to the power of 3
-andika(matokeo)  # 8
+acha majina = ["Amina", "Juma", "Neema"]
+
+kwa jina katika majina {
+    andika(jina)
+}
 ```
 
-## 9. Comments (Maelezo ya Pembeni)
-
-Comments are created using the `#` symbol:
+### Ranges
 
 ```swahili
-# This is a comment
-var nambari = 10  # This stores the number 10
+kwa i katika 1..5 {
+    andika(i)
+}
 ```
+
+`1..5` follows the existing SwahiliPro loop behavior: the start is included and the end is excluded, so it produces `1, 2, 3, 4`.
+
+A stepped range is also supported:
+
+```swahili
+kwa i katika 0..10..2 {
+    andika(i)
+}
+```
+
+### While
+
+```swahili
+wakati (salio > 0) {
+    salio = salio - 1
+}
+```
+
+### Loop control
+
+```swahili
+kwa i katika 1..100 {
+    ikiwa (i == 5) { endelea }
+    ikiwa (i == 20) { vunja }
+    andika(i)
+}
+```
+
+## Lists
+
+Lists now use conventional indexing:
+
+```swahili
+acha majina = ["Amina", "Juma", "Neema"]
+
+andika(majina[0])
+ongeza(majina, "Bonnie")
+ondoa(majina, 1)
+andika(urefu(majina))
+```
+
+Nested indexing works as expected:
+
+```swahili
+acha wanafunzi = [
+    ["Amina", 20],
+    ["Juma", 22]
+]
+
+andika(wanafunzi[0][0])
+```
+
+Arithmetic symbols retain their normal meanings. List operations should use explicit built-ins instead of overloading `/`, `-`, or `*` with list-specific behavior.
+
+## Core built-ins
+
+| Function | Purpose |
+|---|---|
+| `andika(value)` | Print output |
+| `ingiza(prompt)` | Read text input |
+| `ingiza_namba(prompt)` | Read numeric input |
+| `urefu(value)` | Get length |
+| `ongeza(orodha, value)` | Append to a list |
+| `ondoa(orodha, index)` | Remove and return a list item |
+| `ni_namba(value)` | Check for a number |
+| `ni_neno(value)` | Check for a string |
+| `ni_orodha(value)` | Check for a list |
+| `ni_function(value)` | Check whether a value is callable |
+| `endesha(file)` | Run a SwahiliPro source file |
+
+## Operators
+
+SwahiliPro keeps familiar programming operators:
+
+```text
++  -  *  /  ^
+== != < > <= >=
+=  ( ) [ ] { } ,
+```
+
+Comments continue to use `#`:
+
+```swahili
+# Hii ni comment
+acha bei = 150
+```
+
+## v1 compatibility
+
+The v2 runtime includes a migration layer for common v1 programs. Existing forms such as these remain accepted during the migration window:
+
+```text
+VAR
+NJIA
+IKIWA ... BASI
+AU_IKIWA
+IKIWA_NYINGINE
+WAKATI ... BASI
+KWA ... HADI ... BASI
+FUNGA
+```
+
+The canonical syntax for all new code is lowercase v2 syntax.
+
+| v1 | v2 |
+|---|---|
+| `VAR jina = ...` | `acha jina = ...` |
+| `NJIA ongeza(a,b) -> ...` | `ongeza(a,b) => ...` |
+| `NJIA ongeza(a,b) ... FUNGA` | `ongeza(a,b) { ... }` |
+| `IKIWA x BASI ... FUNGA` | `ikiwa (x) { ... }` |
+| `AU_IKIWA` | `au ikiwa` |
+| `IKIWA_NYINGINE` | `vinginevyo` |
+| `WAKATI x BASI` | `wakati (x) {` |
+| `KWA i = 0 HADI 10 BASI` | `kwa i katika 0..10 {` |
+| `CONTINUE` | `endelea` |
+| `FUNGA` | `}` |
+
+Legacy runtime names including `ANDIKA`, `BONYEZA`, `UREFU`, `UNGANISHA`, `POP`, `KWELI`, and `UONGO` are also retained as temporary aliases.
+
+## Design direction
+
+SwahiliPro v2 intentionally avoids translating punctuation or inventing Swahili replacements for concepts programmers already recognize. The language should require as little explanation as possible while still reading naturally in Swahili.

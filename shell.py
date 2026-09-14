@@ -1,5 +1,10 @@
 import time
-import swahilipro.swahilipro as swahilipro
+
+try:
+    import swahilipro.swahilipro as swahilipro
+except ImportError:
+    import swahilipro
+
 ascii_art = [
     [
         "   ____",
@@ -25,42 +30,40 @@ ascii_art = [
         " \\ \\__,_|",
         "  \\____/ "
     ],
-	[
-    "_      ",
-    "| |     ",
-    "| |___  ",
-    "|  __ | ",
-    "| | | | ",
-    "|_| |_| "
-   ],
-   [
-    " _  ",
-    "| | ",
-    "| | ",
-    "| | ",
-    "| | ",
-    "|_| "
-],
-[
-    " _    ",
-    "| |   ",
-    "| |   ",
-    "| |   ",
-    "| |__ ",
-    "|____|"
-],
-
-
-
-[
-    " _  ",
-    "| | ",
-    "| | ",
-    "| | ",
-    "| | ",
-    "|_| "
+    [
+        "_      ",
+        "| |     ",
+        "| |___  ",
+        "|  __ | ",
+        "| | | | ",
+        "|_| |_| "
+    ],
+    [
+        " _  ",
+        "| | ",
+        "| | ",
+        "| | ",
+        "| | ",
+        "|_| "
+    ],
+    [
+        " _    ",
+        "| |   ",
+        "| |   ",
+        "| |   ",
+        "| |__ ",
+        "|____|"
+    ],
+    [
+        " _  ",
+        "| | ",
+        "| | ",
+        "| | ",
+        "| | ",
+        "|_| "
+    ]
 ]
-]
+
 
 def print_ascii_art(art):
     for i in range(len(art[0])):
@@ -71,8 +74,10 @@ def print_ascii_art(art):
 
 print_ascii_art(ascii_art)
 while True:
-    text = input('SWAHILI > ')
-    result, error = swahilipro.run('<stdin>', text)
+    text = input("SWAHILI > ")
+    result, error = swahilipro.run("<stdin>", text)
 
-    if error: print(error.as_string())
-    else: print(result)
+    if error:
+        print(error.as_string())
+    elif result is not None:
+        print(result)
