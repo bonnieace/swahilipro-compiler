@@ -1,8 +1,14 @@
 name: Publish VS Code Marketplace
 
 on:
-  release:
-    types: [published]
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+    secrets:
+      VSCE_PAT:
+        required: true
   workflow_dispatch:
     inputs:
       version:
@@ -14,7 +20,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: marketplace-${{ github.event.release.tag_name || inputs.version }}
+  group: marketplace-${{ inputs.version }}
   cancel-in-progress: false
 
 jobs:
@@ -38,21 +44,17 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Resolve release tag
+      - name: Validate release
         id: release
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "release" ]; then
-            TAG="${{ github.event.release.tag_name }}"
-          else
-            VERSION="${{ inputs.version }}"
-            if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
-              echo "Invalid version '$VERSION'." >&2
-              exit 1
-            fi
-            TAG="v${VERSION}"
+          VERSION="${{ inputs.version }}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid version '$VERSION'." >&2
+            exit 1
           fi
+          TAG="v${VERSION}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
 
@@ -92,6 +94,7 @@ jobs:
             printf '%s\n' "$OUTPUT"
 
             if [ "$STATUS" -eq 0 ]; then
+              echo "Published ${{ matrix.target }} successfully."
               exit 0
             fi
 
@@ -101,6 +104,7 @@ jobs:
             fi
 
             if [ "$ATTEMPT" -eq "$MAX_ATTEMPTS" ]; then
+              echo "Publishing ${{ matrix.target }} failed after $MAX_ATTEMPTS attempts." >&2
               exit "$STATUS"
             fi
 
