@@ -17,6 +17,11 @@ on:
         required: true
         default: false
         type: boolean
+      dry_run:
+        description: "Build and validate everything without publishing or creating a release"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -54,25 +59,27 @@ jobs:
             exit 1
           fi
 
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $TAG already exists." >&2
-            exit 1
-          fi
-
-          refs="$(git ls-remote origin "refs/tags/$TAG" "refs/tags/$TAG^{}" || true)"
-          if [ -n "$refs" ]; then
-            tag_commit="$(printf '%s\n' "$refs" | awk '/\^\{\}$/ {print $1; exit}')"
-            if [ -z "$tag_commit" ]; then
-              tag_commit="$(printf '%s\n' "$refs" | awk 'NR == 1 {print $1}')"
-            fi
-            if [ "$tag_commit" != "$GITHUB_SHA" ]; then
-              echo "Tag $TAG already exists and does not point to this main commit." >&2
+          if [ "${{ inputs.dry_run }}" != "true" ]; then
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "Release $TAG already exists." >&2
               exit 1
             fi
+
+            refs="$(git ls-remote origin "refs/tags/$TAG" "refs/tags/$TAG^{}" || true)"
+            if [ -n "$refs" ]; then
+              tag_commit="$(printf '%s\n' "$refs" | awk '/\^\{\}$/ {print $1; exit}')"
+              if [ -z "$tag_commit" ]; then
+                tag_commit="$(printf '%s\n' "$refs" | awk 'NR == 1 {print $1}')"
+              fi
+              if [ "$tag_commit" != "$GITHUB_SHA" ]; then
+                echo "Tag $TAG already exists and does not point to this main commit." >&2
+                exit 1
+              fi
+            fi
           fi
 
-          if [ "${{ inputs.publish_marketplace }}" = "true" ] && [ -z "${VSCE_PAT:-}" ]; then
-            echo "VSCE_PAT is not configured. Add it under repository Settings > Secrets and variables > Actions, or run with publish_marketplace=false." >&2
+          if [ "${{ inputs.publish_marketplace }}" = "true" ] && [ "${{ inputs.dry_run }}" != "true" ] && [ -z "${VSCE_PAT:-}" ]; then
+            echo "VSCE_PAT is not configured. Add it under repository Settings > Secrets and variables > Actions, or use dry_run=true." >&2
             exit 1
           fi
 
@@ -245,7 +252,7 @@ jobs:
           fetch-depth: 0
 
       - uses: actions/setup-node@v4
-        if: ${{ inputs.publish_marketplace }}
+        if: ${{ inputs.publish_marketplace && !inputs.dry_run }}
         with:
           node-version: "20"
 
@@ -267,7 +274,7 @@ jobs:
         run: find release -maxdepth 2 -type f -print | sort
 
       - name: Publish extension to VS Code Marketplace
-        if: ${{ inputs.publish_marketplace }}
+        if: ${{ inputs.publish_marketplace && !inputs.dry_run }}
         shell: bash
         run: |
           set -euo pipefail
@@ -278,6 +285,7 @@ jobs:
           done
 
       - name: Create GitHub tag and release
+        if: ${{ !inputs.dry_run }}
         shell: bash
         run: |
           set -euo pipefail
@@ -296,3 +304,10 @@ jobs:
             --title "SwahiliPro ${VERSION}" \
             --generate-notes \
             "${extra_args[@]}"
+
+      - name: Dry-run summary
+        if: ${{ inputs.dry_run }}
+        run: |
+          echo "Dry run complete for SwahiliPro ${{ inputs.version }}."
+          echo "All four runtimes and all four VSIX packages were built and validated."
+          echo "No tag, GitHub release, or Marketplace package was published."
