@@ -24,8 +24,74 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  preflight:
+    name: Marketplace preflight
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validate release
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid version '$VERSION'." >&2
+            exit 1
+          fi
+          if [ -z "${VSCE_PAT:-}" ]; then
+            echo "VSCE_PAT is not configured." >&2
+            exit 1
+          fi
+          TAG="v${VERSION}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+
+      - name: Install current Marketplace publisher
+        run: |
+          npm install --global @vscode/vsce@3.9.2
+          echo "Node: $(node --version)"
+          echo "npm: $(npm --version)"
+          echo "vsce: $(vsce --version)"
+
+      - name: Public Gallery API preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          BODY='{"filters":[{"criteria":[{"filterType":7,"value":"masota.swahilipro"}],"pageNumber":1,"pageSize":1,"sortBy":0,"sortOrder":0}],"assetTypes":[],"flags":914}'
+          HTTP_CODE="$(curl --silent --show-error \
+            --connect-timeout 15 \
+            --max-time 45 \
+            --output /tmp/marketplace-gallery.json \
+            --write-out '%{http_code}' \
+            --header 'Accept: application/json;api-version=7.1-preview.1;excludeUrls=true' \
+            --header 'Content-Type: application/json' \
+            --data "$BODY" \
+            'https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery?api-version=7.1-preview.1')"
+
+          echo "Marketplace public Gallery API HTTP status: $HTTP_CODE"
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Public Gallery API preflight failed before any upload was attempted." >&2
+            cat /tmp/marketplace-gallery.json || true
+            exit 1
+          fi
+
+      - name: Authenticated Marketplace permission preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          # This exercises the same Marketplace/Azure DevOps authentication path used by publishing.
+          vsce verify-pat masota --pat "$VSCE_PAT"
+
   publish:
     name: Publish ${{ matrix.target }}
+    needs: preflight
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -42,7 +108,7 @@ jobs:
     steps:
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: Validate release
         id: release
@@ -50,10 +116,6 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${{ inputs.version }}"
-          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
-            echo "Invalid version '$VERSION'." >&2
-            exit 1
-          fi
           TAG="v${VERSION}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
@@ -68,18 +130,18 @@ jobs:
             --pattern "swahilipro-${{ matrix.target }}.vsix" \
             --dir publish
           test -f "publish/swahilipro-${{ matrix.target }}.vsix"
+          ls -lh "publish/swahilipro-${{ matrix.target }}.vsix"
 
-      - name: Install Marketplace publisher
-        run: npm install --global @vscode/vsce@3.6.0
+      - name: Install current Marketplace publisher
+        run: |
+          npm install --global @vscode/vsce@3.9.2
+          echo "Node: $(node --version)"
+          echo "vsce: $(vsce --version)"
 
-      - name: Publish with retries
+      - name: Publish with transient-only retries
         shell: bash
         run: |
           set -euo pipefail
-          if [ -z "${VSCE_PAT:-}" ]; then
-            echo "VSCE_PAT is not configured." >&2
-            exit 1
-          fi
 
           VSIX="publish/swahilipro-${{ matrix.target }}.vsix"
           MAX_ATTEMPTS=4
@@ -87,10 +149,16 @@ jobs:
 
           while [ "$ATTEMPT" -le "$MAX_ATTEMPTS" ]; do
             echo "Publishing $VSIX (attempt $ATTEMPT/$MAX_ATTEMPTS)"
+            STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "Started: $STARTED_AT"
+
             set +e
             OUTPUT="$(vsce publish --packagePath "$VSIX" --pat "$VSCE_PAT" 2>&1)"
             STATUS=$?
             set -e
+
+            FINISHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "Finished: $FINISHED_AT"
             printf '%s\n' "$OUTPUT"
 
             if [ "$STATUS" -eq 0 ]; then
@@ -98,18 +166,41 @@ jobs:
               exit 0
             fi
 
-            if printf '%s\n' "$OUTPUT" | grep -Eiq 'already.*(exist|publish)|version .* (exists|published)'; then
+            # A prior request can be accepted by Marketplace even if the response times out.
+            # Because this job handles one platform only, an existing platform/version is success.
+            if printf '%s\n' "$OUTPUT" | grep -Eiq 'already.*(exist|publish)|version .* (exists|published)|already been published'; then
               echo "This platform/version is already on the Marketplace; treating it as success."
               exit 0
             fi
 
+            # Only retry conditions that are plausibly transient Marketplace/network failures.
+            TRANSIENT_PATTERN='request timeout|timed out|timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|EPIPE|socket hang up|connection reset|temporary failure|temporarily unavailable|service unavailable|bad gateway|gateway timeout|internal server error|too many requests|rate limit|HTTP[^0-9]*(408|425|429|500|502|503|504)|status[^0-9]*(408|425|429|500|502|503|504)'
+
+            if ! printf '%s\n' "$OUTPUT" | grep -Eiq "$TRANSIENT_PATTERN"; then
+              echo "Publish failed with a non-transient error; not retrying." >&2
+              exit "$STATUS"
+            fi
+
             if [ "$ATTEMPT" -eq "$MAX_ATTEMPTS" ]; then
-              echo "Publishing ${{ matrix.target }} failed after $MAX_ATTEMPTS attempts." >&2
+              echo "Transient publishing failure persisted after $MAX_ATTEMPTS attempts." >&2
               exit "$STATUS"
             fi
 
             WAIT_SECONDS=$((15 * (1 << (ATTEMPT - 1))))
-            echo "Retrying in ${WAIT_SECONDS}s..."
+            echo "Transient Marketplace/network failure detected. Retrying in ${WAIT_SECONDS}s."
+
+            # Recheck Marketplace health before the next upload attempt.
+            set +e
+            vsce show masota.swahilipro --json >/tmp/vsce-pre-retry.json 2>/tmp/vsce-pre-retry.err
+            PREFLIGHT_STATUS=$?
+            set -e
+            if [ "$PREFLIGHT_STATUS" -ne 0 ]; then
+              echo "Marketplace read preflight is also failing before retry $((ATTEMPT + 1)):" >&2
+              cat /tmp/vsce-pre-retry.err >&2 || true
+            else
+              echo "Marketplace read preflight succeeded before retry $((ATTEMPT + 1))."
+            fi
+
             sleep "$WAIT_SECONDS"
             ATTEMPT=$((ATTEMPT + 1))
           done
