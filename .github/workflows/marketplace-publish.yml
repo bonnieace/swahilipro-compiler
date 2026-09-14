@@ -8,7 +8,7 @@ on:
         type: string
     secrets:
       VSCE_PAT:
-        required: true
+        required: false
   workflow_dispatch:
     inputs:
       version:
@@ -18,25 +18,28 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 concurrency:
   group: marketplace-${{ inputs.version }}
   cancel-in-progress: false
 
+env:
+  AZURE_DEVOPS_RESOURCE: 499b84ac-1321-427f-aa17-267ca6975798
+  AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+
 jobs:
   preflight:
-    name: Marketplace preflight
+    name: Marketplace Entra preflight
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
-      VSCE_PAT: ${{ secrets.VSCE_PAT }}
     steps:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
 
-      - name: Validate release
-        id: release
+      - name: Validate release and configuration
         shell: bash
         run: |
           set -euo pipefail
@@ -45,19 +48,14 @@ jobs:
             echo "Invalid version '$VERSION'." >&2
             exit 1
           fi
-          if [ -z "${VSCE_PAT:-}" ]; then
-            echo "VSCE_PAT is not configured." >&2
-            exit 1
-          fi
-          TAG="v${VERSION}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+          test -n "${{ vars.AZURE_CLIENT_ID }}" || { echo "Repository variable AZURE_CLIENT_ID is not configured." >&2; exit 1; }
+          test -n "${{ vars.AZURE_TENANT_ID }}" || { echo "Repository variable AZURE_TENANT_ID is not configured." >&2; exit 1; }
+          gh release view "v${VERSION}" --repo "$GITHUB_REPOSITORY" >/dev/null
 
-      - name: Install current Marketplace publisher
+      - name: Install supported Marketplace publisher
         run: |
           npm install --global @vscode/vsce@3.9.2
           echo "Node: $(node --version)"
-          echo "npm: $(npm --version)"
           echo "vsce: $(vsce --version)"
 
       - name: Public Gallery API preflight
@@ -65,29 +63,41 @@ jobs:
         run: |
           set -euo pipefail
           BODY='{"filters":[{"criteria":[{"filterType":7,"value":"masota.swahilipro"}],"pageNumber":1,"pageSize":1,"sortBy":0,"sortOrder":0}],"assetTypes":[],"flags":914}'
-          HTTP_CODE="$(curl --silent --show-error \
-            --connect-timeout 15 \
-            --max-time 45 \
-            --output /tmp/marketplace-gallery.json \
-            --write-out '%{http_code}' \
+          HTTP_CODE="$(curl --silent --show-error --connect-timeout 15 --max-time 45 \
+            --output /tmp/marketplace-gallery.json --write-out '%{http_code}' \
             --header 'Accept: application/json;api-version=7.1-preview.1;excludeUrls=true' \
-            --header 'Content-Type: application/json' \
-            --data "$BODY" \
+            --header 'Content-Type: application/json' --data "$BODY" \
             'https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery?api-version=7.1-preview.1')"
-
           echo "Marketplace public Gallery API HTTP status: $HTTP_CODE"
-          if [ "$HTTP_CODE" != "200" ]; then
-            echo "Public Gallery API preflight failed before any upload was attempted." >&2
-            cat /tmp/marketplace-gallery.json || true
-            exit 1
-          fi
+          test "$HTTP_CODE" = "200" || { cat /tmp/marketplace-gallery.json || true; exit 1; }
 
-      - name: Authenticated Marketplace permission preflight
+      - name: Sign in to Microsoft Entra with GitHub OIDC
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - name: Verify Marketplace/Azure DevOps access token
         shell: bash
         run: |
           set -euo pipefail
-          # This exercises the same Marketplace/Azure DevOps authentication path used by publishing.
-          vsce verify-pat masota --pat "$VSCE_PAT"
+          TOKEN="$(az account get-access-token --resource "$AZURE_DEVOPS_RESOURCE" --query accessToken -o tsv)"
+          test -n "$TOKEN"
+          unset TOKEN
+          echo "Microsoft Entra access token acquired for the Marketplace/Azure DevOps resource."
+
+      - name: Resolve Marketplace identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "The ID below is the identity to add to publisher 'masota' as Contributor if it is not already a member:"
+          az rest \
+            --method get \
+            --url 'https://app.vssps.visualstudio.com/_apis/profile/profiles/me' \
+            --resource "$AZURE_DEVOPS_RESOURCE" \
+            --query '{id:id,displayName:displayName}' \
+            --output json
 
   publish:
     name: Publish ${{ matrix.target }}
@@ -104,80 +114,56 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
-      VSCE_PAT: ${{ secrets.VSCE_PAT }}
     steps:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
 
-      - name: Validate release
-        id: release
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="${{ inputs.version }}"
-          TAG="v${VERSION}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+      - name: Sign in to Microsoft Entra with GitHub OIDC
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
 
       - name: Download platform VSIX from GitHub Release
         shell: bash
         run: |
           set -euo pipefail
+          VERSION="${{ inputs.version }}"
           mkdir -p publish
-          gh release download "${{ steps.release.outputs.tag }}" \
-            --repo "$GITHUB_REPOSITORY" \
-            --pattern "swahilipro-${{ matrix.target }}.vsix" \
-            --dir publish
+          gh release download "v${VERSION}" --repo "$GITHUB_REPOSITORY" \
+            --pattern "swahilipro-${{ matrix.target }}.vsix" --dir publish
           test -f "publish/swahilipro-${{ matrix.target }}.vsix"
           ls -lh "publish/swahilipro-${{ matrix.target }}.vsix"
 
-      - name: Install current Marketplace publisher
-        run: |
-          npm install --global @vscode/vsce@3.9.2
-          echo "Node: $(node --version)"
-          echo "vsce: $(vsce --version)"
+      - name: Install supported Marketplace publisher
+        run: npm install --global @vscode/vsce@3.9.2
 
-      - name: Publish with transient-only retries
+      - name: Publish with Entra identity and transient-only retries
         shell: bash
         run: |
           set -euo pipefail
-
           VSIX="publish/swahilipro-${{ matrix.target }}.vsix"
           MAX_ATTEMPTS=4
           ATTEMPT=1
 
           while [ "$ATTEMPT" -le "$MAX_ATTEMPTS" ]; do
-            echo "Publishing $VSIX (attempt $ATTEMPT/$MAX_ATTEMPTS)"
-            STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            echo "Started: $STARTED_AT"
-
+            echo "Publishing $VSIX with Microsoft Entra identity (attempt $ATTEMPT/$MAX_ATTEMPTS)"
             set +e
-            OUTPUT="$(vsce publish --packagePath "$VSIX" --pat "$VSCE_PAT" 2>&1)"
+            OUTPUT="$(vsce publish --packagePath "$VSIX" --azure-credential --skip-duplicate 2>&1)"
             STATUS=$?
             set -e
-
-            FINISHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            echo "Finished: $FINISHED_AT"
             printf '%s\n' "$OUTPUT"
 
             if [ "$STATUS" -eq 0 ]; then
-              echo "Published ${{ matrix.target }} successfully."
+              echo "Published or already present: ${{ matrix.target }}"
               exit 0
             fi
 
-            # A prior request can be accepted by Marketplace even if the response times out.
-            # Because this job handles one platform only, an existing platform/version is success.
-            if printf '%s\n' "$OUTPUT" | grep -Eiq 'already.*(exist|publish)|version .* (exists|published)|already been published'; then
-              echo "This platform/version is already on the Marketplace; treating it as success."
-              exit 0
-            fi
-
-            # Only retry conditions that are plausibly transient Marketplace/network failures.
-            TRANSIENT_PATTERN='request timeout|timed out|timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|EPIPE|socket hang up|connection reset|temporary failure|temporarily unavailable|service unavailable|bad gateway|gateway timeout|internal server error|too many requests|rate limit|HTTP[^0-9]*(408|425|429|500|502|503|504)|status[^0-9]*(408|425|429|500|502|503|504)'
-
+            TRANSIENT_PATTERN='request timeout|timed out|timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|EPIPE|socket hang up|connection reset|fetch failed|temporary failure|temporarily unavailable|service unavailable|bad gateway|gateway timeout|internal server error|too many requests|rate limit|HTTP[^0-9]*(408|425|429|500|502|503|504)|status[^0-9]*(408|425|429|500|502|503|504)'
             if ! printf '%s\n' "$OUTPUT" | grep -Eiq "$TRANSIENT_PATTERN"; then
-              echo "Publish failed with a non-transient error; not retrying." >&2
+              echo "Publish failed with a non-transient authentication, permission, validation, or package error; not retrying." >&2
               exit "$STATUS"
             fi
 
@@ -188,19 +174,6 @@ jobs:
 
             WAIT_SECONDS=$((15 * (1 << (ATTEMPT - 1))))
             echo "Transient Marketplace/network failure detected. Retrying in ${WAIT_SECONDS}s."
-
-            # Recheck Marketplace health before the next upload attempt.
-            set +e
-            vsce show masota.swahilipro --json >/tmp/vsce-pre-retry.json 2>/tmp/vsce-pre-retry.err
-            PREFLIGHT_STATUS=$?
-            set -e
-            if [ "$PREFLIGHT_STATUS" -ne 0 ]; then
-              echo "Marketplace read preflight is also failing before retry $((ATTEMPT + 1)):" >&2
-              cat /tmp/vsce-pre-retry.err >&2 || true
-            else
-              echo "Marketplace read preflight succeeded before retry $((ATTEMPT + 1))."
-            fi
-
             sleep "$WAIT_SECONDS"
             ATTEMPT=$((ATTEMPT + 1))
           done
