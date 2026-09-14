@@ -6,9 +6,6 @@ on:
       version:
         required: true
         type: string
-    secrets:
-      VSCE_PAT:
-        required: true
   workflow_dispatch:
     inputs:
       version:
@@ -18,6 +15,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 concurrency:
   group: marketplace-${{ inputs.version }}
@@ -25,11 +23,10 @@ concurrency:
 
 jobs:
   preflight:
-    name: Marketplace preflight
+    name: Marketplace OIDC preflight
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
-      VSCE_PAT: ${{ secrets.VSCE_PAT }}
     steps:
       - uses: actions/setup-node@v4
         with:
@@ -43,10 +40,6 @@ jobs:
           VERSION="${{ inputs.version }}"
           if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
             echo "Invalid version '$VERSION'." >&2
-            exit 1
-          fi
-          if [ -z "${VSCE_PAT:-}" ]; then
-            echo "VSCE_PAT is not configured." >&2
             exit 1
           fi
           TAG="v${VERSION}"
@@ -82,12 +75,52 @@ jobs:
             exit 1
           fi
 
-      - name: Authenticated Marketplace permission preflight
+      - name: GitHub OIDC and Marketplace trust preflight
         shell: bash
         run: |
           set -euo pipefail
-          # This exercises the same Marketplace/Azure DevOps authentication path used by publishing.
-          vsce verify-pat masota --pat "$VSCE_PAT"
+
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+            echo "GitHub did not expose OIDC token request variables. Check permissions: id-token: write." >&2
+            exit 1
+          fi
+
+          TOKEN_URL="$(node -e 'const u=new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL); u.searchParams.set("audience", "marketplace.visualstudio.com"); process.stdout.write(u.toString())')"
+
+          OIDC_JSON="$(curl --silent --show-error --fail-with-body \
+            --connect-timeout 15 \
+            --max-time 45 \
+            --header "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            --header 'Accept: application/json' \
+            "$TOKEN_URL")"
+
+          OIDC_TOKEN="$(printf '%s' "$OIDC_JSON" | node -e 'let s=""; process.stdin.on("data",d=>s+=d); process.stdin.on("end",()=>{const v=JSON.parse(s).value; if(!v) process.exit(2); process.stdout.write(v);});')"
+          unset OIDC_JSON
+
+          HTTP_CODE="$(curl --silent --show-error \
+            --connect-timeout 15 \
+            --max-time 60 \
+            --output /tmp/marketplace-oidc.json \
+            --write-out '%{http_code}' \
+            --header 'Accept: application/json' \
+            --header "Authorization: Bearer ${OIDC_TOKEN}" \
+            --header 'Content-Type: application/json' \
+            --header 'User-Agent: vsce' \
+            --data '{"publisherName":"masota"}' \
+            'https://marketplace.visualstudio.com/_apis/gallery/token')"
+          unset OIDC_TOKEN
+
+          echo "Marketplace OIDC token exchange HTTP status: $HTTP_CODE"
+          if ! [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]]; then
+            echo "Marketplace rejected the GitHub OIDC identity. Configure a trusted publishing policy for publisher 'masota' that trusts this repository and workflow." >&2
+            node -e 'const fs=require("fs"); const p="/tmp/marketplace-oidc.json"; try { const v=JSON.parse(fs.readFileSync(p,"utf8")); console.error(v.message || v.error_description || v.error || `HTTP response without a Marketplace error message`); } catch { console.error("Marketplace returned a non-JSON error response."); }'
+            rm -f /tmp/marketplace-oidc.json
+            exit 1
+          fi
+
+          node -e 'const fs=require("fs"); const p="/tmp/marketplace-oidc.json"; const v=JSON.parse(fs.readFileSync(p,"utf8")); if(!v.credential) throw new Error("Marketplace OIDC exchange succeeded but returned no credential");'
+          rm -f /tmp/marketplace-oidc.json
+          echo "GitHub OIDC identity is trusted by Marketplace for publisher 'masota'."
 
   publish:
     name: Publish ${{ matrix.target }}
@@ -104,7 +137,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
-      VSCE_PAT: ${{ secrets.VSCE_PAT }}
     steps:
       - uses: actions/setup-node@v4
         with:
@@ -138,7 +170,7 @@ jobs:
           echo "Node: $(node --version)"
           echo "vsce: $(vsce --version)"
 
-      - name: Publish with transient-only retries
+      - name: Publish with OIDC and transient-only retries
         shell: bash
         run: |
           set -euo pipefail
@@ -148,12 +180,12 @@ jobs:
           ATTEMPT=1
 
           while [ "$ATTEMPT" -le "$MAX_ATTEMPTS" ]; do
-            echo "Publishing $VSIX (attempt $ATTEMPT/$MAX_ATTEMPTS)"
+            echo "Publishing $VSIX with OIDC (attempt $ATTEMPT/$MAX_ATTEMPTS)"
             STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo "Started: $STARTED_AT"
 
             set +e
-            OUTPUT="$(vsce publish --packagePath "$VSIX" --pat "$VSCE_PAT" 2>&1)"
+            OUTPUT="$(vsce publish --packagePath "$VSIX" --oidc 2>&1)"
             STATUS=$?
             set -e
 
@@ -167,14 +199,13 @@ jobs:
             fi
 
             # A prior request can be accepted by Marketplace even if the response times out.
-            # Because this job handles one platform only, an existing platform/version is success.
             if printf '%s\n' "$OUTPUT" | grep -Eiq 'already.*(exist|publish)|version .* (exists|published)|already been published'; then
               echo "This platform/version is already on the Marketplace; treating it as success."
               exit 0
             fi
 
-            # Only retry conditions that are plausibly transient Marketplace/network failures.
-            TRANSIENT_PATTERN='request timeout|timed out|timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|EPIPE|socket hang up|connection reset|temporary failure|temporarily unavailable|service unavailable|bad gateway|gateway timeout|internal server error|too many requests|rate limit|HTTP[^0-9]*(408|425|429|500|502|503|504)|status[^0-9]*(408|425|429|500|502|503|504)'
+            # Retry only genuine transient network/service errors. Authentication/policy/package errors fail immediately.
+            TRANSIENT_PATTERN='request timeout|timed out|timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|EPIPE|socket hang up|connection reset|fetch failed|temporary failure|temporarily unavailable|service unavailable|bad gateway|gateway timeout|internal server error|too many requests|rate limit|HTTP[^0-9]*(408|425|429|500|502|503|504)|status[^0-9]*(408|425|429|500|502|503|504)'
 
             if ! printf '%s\n' "$OUTPUT" | grep -Eiq "$TRANSIENT_PATTERN"; then
               echo "Publish failed with a non-transient error; not retrying." >&2
@@ -189,7 +220,6 @@ jobs:
             WAIT_SECONDS=$((15 * (1 << (ATTEMPT - 1))))
             echo "Transient Marketplace/network failure detected. Retrying in ${WAIT_SECONDS}s."
 
-            # Recheck Marketplace health before the next upload attempt.
             set +e
             vsce show masota.swahilipro --json >/tmp/vsce-pre-retry.json 2>/tmp/vsce-pre-retry.err
             PREFLIGHT_STATUS=$?
