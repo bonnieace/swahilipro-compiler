@@ -6,6 +6,25 @@ This branch introduces the **SwahiliPro v2 syntax**. The main design rule is sim
 
 > Keep universal programming structure familiar; use Swahili for the human-readable parts.
 
+## CLI
+
+The canonical command is `swa`.
+
+```bash
+swa hello.swa
+swa
+swa repl
+swa --version
+swa --help
+```
+
+- `swa hello.swa` runs a SwahiliPro source file.
+- `swa` opens the interactive REPL.
+- `swa repl` explicitly opens the REPL.
+- `swa --version` prints the installed SwahiliPro version.
+
+The release pipeline builds standalone Windows, macOS and Linux binaries with PyInstaller. End users therefore do **not** need Python or pip installed to run the CLI.
+
 ## Quick example
 
 ```swahili
@@ -252,6 +271,10 @@ The canonical syntax for all new code is lowercase v2 syntax.
 | `FUNGA` | `}` |
 
 Legacy runtime names including `ANDIKA`, `BONYEZA`, `UREFU`, `UNGANISHA`, `POP`, `KWELI`, and `UONGO` are also retained as temporary aliases.
+
+## Distribution direction
+
+The standalone `swa` binary is the shared runtime artifact for the CLI and editor integrations. The VS Code extension should bundle the matching platform binary, while pip remains an optional developer/legacy channel rather than an end-user requirement.
 
 ## Design direction
 
