@@ -1,0 +1,313 @@
+name: Release SwahiliPro
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version without the v prefix, for example 2.0.0"
+        required: true
+        type: string
+      publish_marketplace:
+        description: "Publish platform-specific VSIX packages to the VS Code Marketplace"
+        required: true
+        default: true
+        type: boolean
+      prerelease:
+        description: "Mark the GitHub release as a prerelease"
+        required: true
+        default: false
+        type: boolean
+      dry_run:
+        description: "Build and validate everything without publishing or creating a release"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: swahilipro-release
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate release
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate release request
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          TAG="v${VERSION}"
+
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "Releases must be started from the main branch." >&2
+            exit 1
+          fi
+
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid version '$VERSION'. Use a semantic version such as 2.0.0 or 2.1.0-beta.1." >&2
+            exit 1
+          fi
+
+          if [ "${{ inputs.dry_run }}" != "true" ]; then
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "Release $TAG already exists." >&2
+              exit 1
+            fi
+
+            refs="$(git ls-remote origin "refs/tags/$TAG" "refs/tags/$TAG^{}" || true)"
+            if [ -n "$refs" ]; then
+              tag_commit="$(printf '%s\n' "$refs" | awk '/\^\{\}$/ {print $1; exit}')"
+              if [ -z "$tag_commit" ]; then
+                tag_commit="$(printf '%s\n' "$refs" | awk 'NR == 1 {print $1}')"
+              fi
+              if [ "$tag_commit" != "$GITHUB_SHA" ]; then
+                echo "Tag $TAG already exists and does not point to this main commit." >&2
+                exit 1
+              fi
+            fi
+          fi
+
+          if [ "${{ inputs.publish_marketplace }}" = "true" ] && [ "${{ inputs.dry_run }}" != "true" ] && [ -z "${VSCE_PAT:-}" ]; then
+            echo "VSCE_PAT is not configured. Add it under repository Settings > Secrets and variables > Actions, or use dry_run=true." >&2
+            exit 1
+          fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run compiler tests
+        run: |
+          python -m pip install --upgrade pip pytest
+          python -m pytest -q
+
+  build-runtime:
+    name: Build runtime (${{ matrix.target }})
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x64
+            source: dist/swa
+            runtime_file: swa-linux-x86_64
+          - os: windows-latest
+            target: win32-x64
+            source: dist/swa.exe
+            runtime_file: swa-windows-x86_64.exe
+          - os: macos-15-intel
+            target: darwin-x64
+            source: dist/swa
+            runtime_file: swa-darwin-x86_64
+          - os: macos-latest
+            target: darwin-arm64
+            source: dist/swa
+            runtime_file: swa-darwin-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build dependencies
+        run: python -m pip install --upgrade pip pyinstaller
+
+      - name: Stamp runtime version
+        shell: python
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          import os
+          import re
+          from pathlib import Path
+
+          path = Path("swa_cli.py")
+          text = path.read_text(encoding="utf-8")
+          replacement = f'VERSION = "{os.environ["RELEASE_VERSION"]}"'
+          text, count = re.subn(r'^VERSION = ".*"$', replacement, text, count=1, flags=re.MULTILINE)
+          if count != 1:
+              raise SystemExit("Could not stamp swa_cli.py version")
+          path.write_text(text, encoding="utf-8")
+
+      - name: Build standalone swa binary
+        run: pyinstaller --clean --onefile --name swa swa_cli.py
+
+      - name: Verify standalone binary version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            ./dist/swa.exe --version | grep -F "SwahiliPro ${{ inputs.version }}"
+          else
+            ./dist/swa --version | grep -F "SwahiliPro ${{ inputs.version }}"
+          fi
+
+      - name: Give runtime its release filename
+        shell: python
+        env:
+          SOURCE: ${{ matrix.source }}
+          TARGET: dist/${{ matrix.runtime_file }}
+        run: |
+          import os
+          import shutil
+          from pathlib import Path
+
+          source = Path(os.environ["SOURCE"])
+          target = Path(os.environ["TARGET"])
+          shutil.copy2(source, target)
+          print(target)
+
+      - name: Upload runtime artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-${{ matrix.target }}
+          path: dist/${{ matrix.runtime_file }}
+          if-no-files-found: error
+
+  package-extension:
+    name: Package extension (${{ matrix.target }})
+    needs: build-runtime
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runtime_file: swa-linux-x86_64
+            bundled_name: swa
+          - target: win32-x64
+            runtime_file: swa-windows-x86_64.exe
+            bundled_name: swa.exe
+          - target: darwin-x64
+            runtime_file: swa-darwin-x86_64
+            bundled_name: swa
+          - target: darwin-arm64
+            runtime_file: swa-darwin-arm64
+            bundled_name: swa
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout VS Code extension
+        run: git clone --depth 1 --branch master https://github.com/bonnieace/swahilipro_extension.git extension
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Download matching runtime
+        uses: actions/download-artifact@v4
+        with:
+          name: runtime-${{ matrix.target }}
+          path: runtime-download
+
+      - name: Install and validate extension
+        working-directory: extension
+        run: |
+          npm install --no-package-lock
+          npm version "${{ inputs.version }}" --no-git-tag-version --allow-same-version
+          npm run check
+
+      - name: Package extension with bundled runtime
+        working-directory: extension
+        run: node scripts/package-with-runtime.js "../runtime-download/${{ matrix.runtime_file }}" "${{ matrix.target }}"
+
+      - name: Verify runtime is inside VSIX
+        shell: bash
+        run: |
+          set -euo pipefail
+          unzip -l "extension/dist/swahilipro-${{ matrix.target }}.vsix" | grep -F "extension/runtime/${{ matrix.bundled_name }}"
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix-${{ matrix.target }}
+          path: extension/dist/swahilipro-${{ matrix.target }}.vsix
+          if-no-files-found: error
+
+  release:
+    name: Publish SwahiliPro ${{ inputs.version }}
+    needs:
+      - validate
+      - build-runtime
+      - package-extension
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        if: ${{ inputs.publish_marketplace && !inputs.dry_run }}
+        with:
+          node-version: "20"
+
+      - name: Download runtime artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: runtime-*
+          path: release/runtime
+          merge-multiple: true
+
+      - name: Download extension artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: vsix-*
+          path: release/vsix
+          merge-multiple: true
+
+      - name: Show release contents
+        run: find release -maxdepth 2 -type f -print | sort
+
+      - name: Publish extension to VS Code Marketplace
+        if: ${{ inputs.publish_marketplace && !inputs.dry_run }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global @vscode/vsce@3.6.0
+          for vsix in release/vsix/*.vsix; do
+            echo "Publishing $vsix"
+            vsce publish --packagePath "$vsix" --pat "$VSCE_PAT"
+          done
+
+      - name: Create GitHub tag and release
+        if: ${{ !inputs.dry_run }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          TAG="v${VERSION}"
+          extra_args=()
+          if [ "${{ inputs.prerelease }}" = "true" ]; then
+            extra_args+=(--prerelease)
+          fi
+
+          gh release create "$TAG" \
+            release/runtime/* \
+            release/vsix/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "SwahiliPro ${VERSION}" \
+            --generate-notes \
+            "${extra_args[@]}"
+
+      - name: Dry-run summary
+        if: ${{ inputs.dry_run }}
+        run: |
+          echo "Dry run complete for SwahiliPro ${{ inputs.version }}."
+          echo "All four runtimes and all four VSIX packages were built and validated."
+          echo "No tag, GitHub release, or Marketplace package was published."
