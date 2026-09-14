@@ -1,7 +1,7 @@
 try:
-    from .environment_v2 import Environment, ReturnSignal
+    from .environment_v2 import Environment, ReturnSignal, BreakSignal, ContinueSignal
 except ImportError:
-    from environment_v2 import Environment, ReturnSignal
+    from environment_v2 import Environment, ReturnSignal, BreakSignal, ContinueSignal
 
 
 class UserFunction:
@@ -25,6 +25,8 @@ class UserFunction:
             self.interpreter.execute_program(self.body, env)
         except ReturnSignal as signal:
             return signal.value
+        except (BreakSignal, ContinueSignal):
+            raise self.interpreter.runtime_error("'vunja' na 'endelea' haziwezi kuvuka mpaka wa function")
         return None
 
     def __repr__(self):
