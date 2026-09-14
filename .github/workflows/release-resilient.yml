@@ -48,9 +48,15 @@ jobs:
             echo "Invalid semantic version: $VERSION" >&2
             exit 1
           fi
-          if [ "${{ inputs.dry_run }}" != "true" ] && gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $TAG already exists. Use 'Publish VS Code Marketplace' to repair Marketplace publishing for an existing release." >&2
-            exit 1
+          if [ "${{ inputs.dry_run }}" != "true" ]; then
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "Release $TAG already exists. Use 'Publish VS Code Marketplace' to repair Marketplace publishing for an existing release." >&2
+              exit 1
+            fi
+            if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+              echo "Tag $TAG already exists. Choose a new version or repair the existing release." >&2
+              exit 1
+            fi
           fi
       - uses: actions/setup-python@v5
         with:
@@ -218,3 +224,12 @@ jobs:
       - name: Dry-run summary
         if: ${{ inputs.dry_run }}
         run: echo "Dry run complete. No tag, GitHub release, or Marketplace package was published."
+
+  publish-marketplace:
+    if: ${{ !inputs.dry_run }}
+    needs: finalize
+    uses: ./.github/workflows/marketplace-publish.yml
+    with:
+      version: ${{ inputs.version }}
+    secrets:
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
