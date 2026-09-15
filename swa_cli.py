@@ -9,17 +9,48 @@ Canonical usage:
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 import sys
+import time
 
 import swahilipro
 
 VERSION = "2.0.0-dev"
 
+BANNER_LINES = (
+    "   ____  " + "  _    _ " + "   ____   " + "_      " + " _  " + " _    " + " _  ",
+    " / ___|  " + " | |  | |" + "  / __ \\ " + "| |     " + "| | " + "| |   " + "| | ",
+    "| |___   " + " | |  | |" + " / / _` |" + "| |___  " + "| | " + "| |   " + "| | ",
+    " \\___ \\ " + " | |/\\| |" + "| | (_| |" + "|  __ | " + "| | " + "| |   " + "| | ",
+    "  ___)|  " + " \\  /\\  /" + " \\ \\__,_|" + "| | | | " + "| | " + "| |__ " + "| | ",
+    " |____/  " + "  \\/  \\/ " + "  \\____/ " + "|_| |_| " + "|_| " + "|____|" + "|_| ",
+)
+
+YELLOW = "\033[93m"
+RESET = "\033[0m"
+
 
 def _print_error(error) -> None:
     message = error.as_string() if hasattr(error, "as_string") else str(error)
     print(message, file=sys.stderr)
+
+
+def _terminal_supports_color() -> bool:
+    return sys.stdout.isatty() and "NO_COLOR" not in os.environ
+
+
+def _print_banner() -> None:
+    """Restore the original SwahiliPro shell identity for the canonical REPL."""
+    use_color = _terminal_supports_color()
+    prefix = YELLOW if use_color else ""
+    suffix = RESET if use_color else ""
+    animate = sys.stdout.isatty()
+
+    for line in BANNER_LINES:
+        print(f"{prefix}{line}{suffix}")
+        if animate:
+            time.sleep(0.06)
 
 
 def execute_source(filename: str, source: str, *, echo_result: bool = False) -> int:
@@ -81,6 +112,7 @@ def _brace_delta(line: str) -> int:
 
 
 def repl() -> int:
+    _print_banner()
     print(f"SwahiliPro {VERSION}")
     print("Andika 'toka' kuondoka. Ctrl+C husitisha mstari wa sasa.")
 
