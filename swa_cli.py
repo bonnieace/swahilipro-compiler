@@ -85,23 +85,47 @@ def execute_source(filename: str, source: str, *, echo_result: bool = False) -> 
     return 0
 
 
-def run_file(filename: str, *, command: str | None = None) -> int:
-    command = command or _command_name()
+def check_source(filename: str, source: str) -> int:
+    error = swahilipro.check(filename, source)
+    if error:
+        _print_error(error)
+        return 1
+    return 0
+
+
+def _read_source(filename: str, *, command: str) -> tuple[str | None, str | None]:
+    if filename == "-":
+        return "<stdin>", sys.stdin.read()
+
     path = Path(filename).expanduser()
     if not path.exists():
         print(f"{command}: faili halijapatikana: {filename}", file=sys.stderr)
-        return 2
+        return None, None
     if not path.is_file():
         print(f"{command}: si faili: {filename}", file=sys.stderr)
-        return 2
+        return None, None
 
     try:
-        source = path.read_text(encoding="utf-8")
+        return str(path), path.read_text(encoding="utf-8")
     except OSError as exc:
         print(f"{command}: imeshindwa kusoma '{filename}': {exc}", file=sys.stderr)
-        return 2
+        return None, None
 
-    return execute_source(str(path), source)
+
+def run_file(filename: str, *, command: str | None = None) -> int:
+    command = command or _command_name()
+    resolved, source = _read_source(filename, command=command)
+    if resolved is None or source is None:
+        return 2
+    return execute_source(resolved, source)
+
+
+def check_file(filename: str, *, command: str | None = None) -> int:
+    command = command or _command_name()
+    resolved, source = _read_source(filename, command=command)
+    if resolved is None or source is None:
+        return 2
+    return check_source(resolved, source)
 
 
 def _brace_delta(line: str) -> int:
@@ -185,7 +209,7 @@ def build_parser(*, prog: str | None = None) -> argparse.ArgumentParser:
         description="SwahiliPro compiler and runtime",
         epilog=(
             f"Mifano: {command} hello.swa | {command} | {command} repl | "
-            f"{command} -v | {command} -help"
+            f"{command} -v | {command} -help | {command} check hello.swa"
         ),
     )
     parser.add_argument(
@@ -216,6 +240,12 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
 
     if any(flag in HELP_FLAGS for flag in arguments):
         _print_banner(animate=False)
+
+    if arguments and arguments[0].lower() == "check":
+        if len(arguments) != 2:
+            print(f"Tumia: {command} check <faili.swa|->", file=sys.stderr)
+            return 2
+        return check_file(arguments[1], command=command)
 
     args = build_parser(prog=command).parse_args(arguments)
     if args.target is None or args.target.lower() == "repl":
