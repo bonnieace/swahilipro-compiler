@@ -3,11 +3,11 @@ import os
 import re
 
 try:
-    from .syntax_v2 import Lexer, Parser, SwahiliProError, RuntimeErrorSwa
+    from .syntax_v2 import Lexer, Parser, ParseError, SwahiliProError, RuntimeErrorSwa
     from .environment_v2 import Environment, ReturnSignal, BreakSignal, ContinueSignal
     from .interpreter_v2 import Interpreter
 except ImportError:
-    from syntax_v2 import Lexer, Parser, SwahiliProError, RuntimeErrorSwa
+    from syntax_v2 import Lexer, Parser, ParseError, SwahiliProError, RuntimeErrorSwa
     from environment_v2 import Environment, ReturnSignal, BreakSignal, ContinueSignal
     from interpreter_v2 import Interpreter
 
@@ -161,11 +161,56 @@ def migrate_legacy_syntax(text):
     return "\n".join(out)
 
 
+def _find_unterminated_string(fn, text):
+    """Reject strings that cross a physical line and point at the opening quote."""
+    for line_no, raw_line in enumerate(text.splitlines()):
+        quote = None
+        quote_col = None
+        escaped = False
+
+        for col, ch in enumerate(raw_line):
+            if escaped:
+                escaped = False
+                continue
+
+            if quote is not None and ch == "\\":
+                escaped = True
+                continue
+
+            if quote is None:
+                if ch == "#":
+                    break
+                if ch in ("'", '"'):
+                    quote = ch
+                    quote_col = col
+                continue
+
+            if ch == quote:
+                quote = None
+                quote_col = None
+
+        if quote is not None:
+            return ParseError(
+                fn,
+                text,
+                line_no,
+                quote_col or 0,
+                "Sintaksia isiokubalika",
+                "Neno halijafungwa",
+            )
+
+    return None
+
+
 GLOBAL_ENV = make_global_env()
 
 
 def check(fn, text):
     """Parse source without executing it; return the first syntax error or None."""
+    string_error = _find_unterminated_string(fn, text)
+    if string_error:
+        return string_error
+
     source = migrate_legacy_syntax(text)
     try:
         tokens = Lexer(fn, source).make_tokens()
@@ -178,6 +223,10 @@ def check(fn, text):
 
 
 def run(fn, text):
+    string_error = _find_unterminated_string(fn, text)
+    if string_error:
+        return None, string_error
+
     source = migrate_legacy_syntax(text)
     try:
         tokens = Lexer(fn, source).make_tokens()
