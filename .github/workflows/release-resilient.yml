@@ -75,20 +75,28 @@ jobs:
         include:
           - os: ubuntu-latest
             target: linux-x64
-            source: dist/swa
+            swa_source: dist/swa
+            alias_source: dist/swahilipro
             runtime_file: swa-linux-x86_64
+            alias_file: swahilipro-linux-x86_64
           - os: windows-latest
             target: win32-x64
-            source: dist/swa.exe
+            swa_source: dist/swa.exe
+            alias_source: dist/swahilipro.exe
             runtime_file: swa-windows-x86_64.exe
+            alias_file: swahilipro-windows-x86_64.exe
           - os: macos-15-intel
             target: darwin-x64
-            source: dist/swa
+            swa_source: dist/swa
+            alias_source: dist/swahilipro
             runtime_file: swa-darwin-x86_64
+            alias_file: swahilipro-darwin-x86_64
           - os: macos-latest
             target: darwin-arm64
-            source: dist/swa
+            swa_source: dist/swa
+            alias_source: dist/swahilipro
             runtime_file: swa-darwin-arm64
+            alias_file: swahilipro-darwin-arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -110,29 +118,43 @@ jobs:
           if count != 1:
               raise SystemExit("Could not stamp swa_cli.py version")
           path.write_text(text, encoding="utf-8")
-      - name: Build standalone swa binary
-        run: pyinstaller --clean --onefile --name swa swa_cli.py
-      - name: Verify standalone binary
+      - name: Build standalone CLI aliases
+        shell: bash
+        run: |
+          pyinstaller --clean --onefile --name swa swa_cli.py
+          pyinstaller --clean --onefile --name swahilipro swa_cli.py
+      - name: Verify standalone binaries
         shell: bash
         run: |
           set -euo pipefail
           if [ "$RUNNER_OS" = "Windows" ]; then
-            ./dist/swa.exe --version | grep -F "SwahiliPro ${{ inputs.version }}"
+            ./dist/swa.exe -v | grep -F "SwahiliPro ${{ inputs.version }}"
+            ./dist/swahilipro.exe -v | grep -F "SwahiliPro ${{ inputs.version }}"
+            ./dist/swa.exe -help >/dev/null
+            ./dist/swahilipro.exe -help >/dev/null
           else
-            ./dist/swa --version | grep -F "SwahiliPro ${{ inputs.version }}"
+            ./dist/swa -v | grep -F "SwahiliPro ${{ inputs.version }}"
+            ./dist/swahilipro -v | grep -F "SwahiliPro ${{ inputs.version }}"
+            ./dist/swa -help >/dev/null
+            ./dist/swahilipro -help >/dev/null
           fi
-      - name: Rename release runtime
+      - name: Rename release runtimes
         shell: python
         env:
-          SOURCE: ${{ matrix.source }}
-          TARGET: dist/${{ matrix.runtime_file }}
+          SWA_SOURCE: ${{ matrix.swa_source }}
+          SWA_TARGET: dist/${{ matrix.runtime_file }}
+          ALIAS_SOURCE: ${{ matrix.alias_source }}
+          ALIAS_TARGET: dist/${{ matrix.alias_file }}
         run: |
           import os, shutil
-          shutil.copy2(os.environ["SOURCE"], os.environ["TARGET"])
+          shutil.copy2(os.environ["SWA_SOURCE"], os.environ["SWA_TARGET"])
+          shutil.copy2(os.environ["ALIAS_SOURCE"], os.environ["ALIAS_TARGET"])
       - uses: actions/upload-artifact@v4
         with:
           name: runtime-${{ matrix.target }}
-          path: dist/${{ matrix.runtime_file }}
+          path: |
+            dist/${{ matrix.runtime_file }}
+            dist/${{ matrix.alias_file }}
           if-no-files-found: error
 
   package-extension:
