@@ -54,6 +54,31 @@ def test_help_flags_show_branded_help(flag, capsys):
     assert "#####" in captured.out
 
 
+def test_check_valid_source_is_silent(tmp_path, capsys):
+    source = tmp_path / "valid.swa"
+    source.write_text('acha jina = "Amina"\nandika(jina)\n', encoding="utf-8")
+
+    code = swa_cli.main(["check", str(source)])
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+def test_check_reports_source_line_and_pointer(tmp_path, capsys):
+    source = tmp_path / "broken.swa"
+    source.write_text('acha jina = "Amina"\n@\n', encoding="utf-8")
+
+    code = swa_cli.main(["check", str(source)])
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "mstari 2" in captured.err
+    assert "@" in captured.err
+    assert "^" in captured.err
+
+
 def test_banner_rows_are_fixed_width():
     lines = swa_cli._banner_lines()
     assert len(lines) == 7
