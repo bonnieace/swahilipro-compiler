@@ -110,7 +110,8 @@ def migrate_legacy_syntax(text):
     out = []
     for raw_line in text.splitlines():
         indent = raw_line[: len(raw_line) - len(raw_line.lstrip())]
-        s = raw_line.strip()
+        original = raw_line.strip()
+        s = original
         if not s:
             out.append(raw_line)
             continue
@@ -157,37 +158,66 @@ def migrate_legacy_syntax(text):
             out.append(indent + "}")
             continue
 
-        out.append(indent + s)
+        # Keep untouched v2 source byte-for-byte on each line so diagnostics
+        # can safely map compiler columns back to the editor.
+        out.append(indent + s if s != original else raw_line)
     return "\n".join(out)
 
 
-def _find_unterminated_string(fn, text):
-    """Reject strings that cross a physical line and point at the opening quote."""
+_OPEN_TO_CLOSE = {"(": ")", "[": "]", "{": "}"}
+_CLOSE_TO_OPEN = {value: key for key, value in _OPEN_TO_CLOSE.items()}
+
+
+def _find_source_structure_error(fn, text):
+    """Find definite quote/delimiter errors before parser recovery can drift."""
+    stack = []
+
     for line_no, raw_line in enumerate(text.splitlines()):
         quote = None
         quote_col = None
         escaped = False
 
         for col, ch in enumerate(raw_line):
-            if escaped:
-                escaped = False
+            if quote is not None:
+                if escaped:
+                    escaped = False
+                    continue
+                if ch == "\\":
+                    escaped = True
+                    continue
+                if ch == quote:
+                    quote = None
+                    quote_col = None
                 continue
 
-            if quote is not None and ch == "\\":
-                escaped = True
+            if ch == "#":
+                break
+            if ch in ("'", '"'):
+                quote = ch
+                quote_col = col
                 continue
 
-            if quote is None:
-                if ch == "#":
-                    break
-                if ch in ("'", '"'):
-                    quote = ch
-                    quote_col = col
+            if ch in _OPEN_TO_CLOSE:
+                stack.append((ch, line_no, col))
                 continue
 
-            if ch == quote:
-                quote = None
-                quote_col = None
+            if ch in _CLOSE_TO_OPEN:
+                if not stack:
+                    return ParseError(
+                        fn, text, line_no, col,
+                        "Sintaksia isiokubalika",
+                        f"Alama '{ch}' ya ziada",
+                    )
+
+                opening, open_line, open_col = stack[-1]
+                expected = _OPEN_TO_CLOSE[opening]
+                if ch != expected:
+                    return ParseError(
+                        fn, text, line_no, col,
+                        "Sintaksia isiokubalika",
+                        f"Alama '{ch}' haifanani na '{opening}'; ilitarajiwa '{expected}'",
+                    )
+                stack.pop()
 
         if quote is not None:
             return ParseError(
@@ -199,6 +229,18 @@ def _find_unterminated_string(fn, text):
                 "Neno halijafungwa",
             )
 
+    if stack:
+        opening, line_no, col = stack[-1]
+        expected = _OPEN_TO_CLOSE[opening]
+        return ParseError(
+            fn,
+            text,
+            line_no,
+            col,
+            "Sintaksia isiokubalika",
+            f"Alama '{opening}' haijafungwa; ongeza '{expected}'",
+        )
+
     return None
 
 
@@ -207,9 +249,9 @@ GLOBAL_ENV = make_global_env()
 
 def check(fn, text):
     """Parse source without executing it; return the first syntax error or None."""
-    string_error = _find_unterminated_string(fn, text)
-    if string_error:
-        return string_error
+    structure_error = _find_source_structure_error(fn, text)
+    if structure_error:
+        return structure_error
 
     source = migrate_legacy_syntax(text)
     try:
@@ -223,9 +265,9 @@ def check(fn, text):
 
 
 def run(fn, text):
-    string_error = _find_unterminated_string(fn, text)
-    if string_error:
-        return None, string_error
+    structure_error = _find_source_structure_error(fn, text)
+    if structure_error:
+        return None, structure_error
 
     source = migrate_legacy_syntax(text)
     try:
