@@ -54,21 +54,34 @@ def test_help_flags_show_branded_help(flag, capsys):
     assert "#####" in captured.out
 
 
-def test_check_valid_source_is_silent(tmp_path, capsys):
-    source = tmp_path / "valid.swa"
-    source.write_text('acha jina = "Amina"\nandika(jina)\n', encoding="utf-8")
-
+def _run_check(tmp_path, capsys, text, name="diagnostic.swa"):
+    source = tmp_path / name
+    source.write_text(text, encoding="utf-8")
     code = swa_cli.main(["check", str(source)])
-
     captured = capsys.readouterr()
+    return code, captured.out, captured.err
+
+
+def _pointer_column(stderr):
+    return stderr.rstrip().splitlines()[-1].index("^")
+
+
+def test_check_valid_source_is_silent(tmp_path, capsys):
+    code, stdout, stderr = _run_check(
+        tmp_path,
+        capsys,
+        'acha jina = "Amina"\nandika(jina)\n',
+    )
+
     assert code == 0
-    assert captured.out == ""
-    assert captured.err == ""
+    assert stdout == ""
+    assert stderr == ""
 
 
 def test_check_accepts_if_else_if_sample_from_editor(tmp_path, capsys):
-    source = tmp_path / "conditions.swa"
-    source.write_text(
+    code, stdout, stderr = _run_check(
+        tmp_path,
+        capsys,
         "acha nchi = 'kenya'\n"
         "\n"
         "ikiwa (nchi == 'kenya'){\n"
@@ -77,53 +90,87 @@ def test_check_accepts_if_else_if_sample_from_editor(tmp_path, capsys):
         "au ikiwa (nchi !='kenya'){\n"
         "    andika('two term')\n"
         "}\n",
-        encoding="utf-8",
+        "conditions.swa",
     )
 
-    code = swa_cli.main(["check", str(source)])
-
-    captured = capsys.readouterr()
     assert code == 0
-    assert captured.out == ""
-    assert captured.err == ""
+    assert stdout == ""
+    assert stderr == ""
 
 
-def test_check_points_missing_quote_at_opening_quote(tmp_path, capsys):
-    source = tmp_path / "missing-quote.swa"
-    source.write_text(
-        "acha nchi = 'kenya'\n"
-        "\n"
-        "ikiwa (nchi == 'kenya){\n"
-        "    andika('one term')\n"
-        "}\n"
-        "au ikiwa (nchi !='kenya'){\n"
-        "    andika('two term')\n"
-        "}\n",
-        encoding="utf-8",
+@pytest.mark.parametrize(
+    ("text", "line_number", "column", "detail"),
+    [
+        (
+            "acha nchi = 'kenya'\n\nikiwa (nchi == 'kenya){\n    andika('one term')\n}\n",
+            3,
+            15,
+            "Neno halijafungwa",
+        ),
+        ('acha ujumbe = "habari\n', 1, 14, "Neno halijafungwa"),
+        ("acha x = [1, 2\n", 1, 9, "haijafungwa"),
+        ("andika('x'\n", 1, 6, "haijafungwa"),
+        ("ikiwa (kweli) {\n    andika('x')\n", 1, 14, "haijafungwa"),
+        ("acha x = (1 + 2\n", 1, 9, "haijafungwa"),
+        ("acha x = [1, 2)\n", 1, 14, "haifanani"),
+        ("acha x = 1 @ 2\n", 1, 11, "haitambuliki"),
+    ],
+)
+def test_check_reports_structural_errors_at_the_causal_character(
+    tmp_path, capsys, text, line_number, column, detail
+):
+    code, _, stderr = _run_check(tmp_path, capsys, text)
+
+    assert code == 1
+    assert f"mstari {line_number}" in stderr
+    assert detail in stderr
+    assert _pointer_column(stderr) == column
+
+
+def test_check_missing_equals_points_to_the_unexpected_value(tmp_path, capsys):
+    code, _, stderr = _run_check(tmp_path, capsys, "acha nchi 'kenya'\n")
+
+    assert code == 1
+    assert "Tumia '='" in stderr
+    assert "mstari 1" in stderr
+    assert _pointer_column(stderr) == 10
+
+
+def test_structure_scan_ignores_delimiters_inside_strings_and_comments(tmp_path, capsys):
+    code, stdout, stderr = _run_check(
+        tmp_path,
+        capsys,
+        "acha ujumbe = '{[( bado ni maandishi )]}'\n"
+        "# } ] ) hizi ni comment tu\n"
+        "andika(ujumbe)\n",
     )
 
-    code = swa_cli.main(["check", str(source)])
+    assert code == 0
+    assert stdout == ""
+    assert stderr == ""
 
-    captured = capsys.readouterr()
+
+def test_check_preserves_v2_source_with_trailing_whitespace(tmp_path, capsys):
+    line = "acha x = 1 @ 2   "
+    code, _, stderr = _run_check(tmp_path, capsys, line + "\n")
+
     assert code == 1
-    assert "Neno halijafungwa" in captured.err
-    assert "mstari 3" in captured.err
-    assert "ikiwa (nchi == 'kenya){" in captured.err
-    pointer_line = captured.err.rstrip().splitlines()[-1]
-    assert pointer_line.index("^") == 15
+    assert line in stderr
+    assert _pointer_column(stderr) == 11
 
 
 def test_check_reports_source_line_and_pointer(tmp_path, capsys):
-    source = tmp_path / "broken.swa"
-    source.write_text('acha jina = "Amina"\n@\n', encoding="utf-8")
+    code, _, stderr = _run_check(
+        tmp_path,
+        capsys,
+        'acha jina = "Amina"\n@\n',
+        "broken.swa",
+    )
 
-    code = swa_cli.main(["check", str(source)])
-
-    captured = capsys.readouterr()
     assert code == 1
-    assert "mstari 2" in captured.err
-    assert "@" in captured.err
-    assert "^" in captured.err
+    assert "mstari 2" in stderr
+    assert "@" in stderr
+    assert "^" in stderr
 
 
 def test_banner_rows_are_fixed_width():
