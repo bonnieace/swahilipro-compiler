@@ -88,6 +88,31 @@ def test_check_accepts_if_else_if_sample_from_editor(tmp_path, capsys):
     assert captured.err == ""
 
 
+def test_check_points_missing_quote_at_opening_quote(tmp_path, capsys):
+    source = tmp_path / "missing-quote.swa"
+    source.write_text(
+        "acha nchi = 'kenya'\n"
+        "\n"
+        "ikiwa (nchi == 'kenya){\n"
+        "    andika('one term')\n"
+        "}\n"
+        "au ikiwa (nchi !='kenya'){\n"
+        "    andika('two term')\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    code = swa_cli.main(["check", str(source)])
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "Neno halijafungwa" in captured.err
+    assert "mstari 3" in captured.err
+    assert "ikiwa (nchi == 'kenya){" in captured.err
+    pointer_line = captured.err.rstrip().splitlines()[-1]
+    assert pointer_line.index("^") == 15
+
+
 def test_check_reports_source_line_and_pointer(tmp_path, capsys):
     source = tmp_path / "broken.swa"
     source.write_text('acha jina = "Amina"\n@\n', encoding="utf-8")
