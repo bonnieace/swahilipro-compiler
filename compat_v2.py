@@ -164,6 +164,19 @@ def migrate_legacy_syntax(text):
 GLOBAL_ENV = make_global_env()
 
 
+def check(fn, text):
+    """Parse source without executing it; return the first syntax error or None."""
+    source = migrate_legacy_syntax(text)
+    try:
+        tokens = Lexer(fn, source).make_tokens()
+        Parser(fn, source, tokens).parse()
+        return None
+    except SwahiliProError as error:
+        return error
+    except Exception as exc:
+        return RuntimeErrorSwa(fn, source, 0, 0, "Kosa la ukaguzi", str(exc))
+
+
 def run(fn, text):
     source = migrate_legacy_syntax(text)
     try:

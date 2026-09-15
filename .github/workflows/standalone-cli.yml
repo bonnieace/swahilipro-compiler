@@ -34,19 +34,28 @@ jobs:
       - name: Run tests
         run: python -m pytest -q
 
-      - name: Build standalone swa binary
-        run: pyinstaller --clean --onefile --name swa swa_cli.py
+      - name: Build standalone CLI aliases
+        shell: bash
+        run: |
+          pyinstaller --clean --onefile --name swa swa_cli.py
+          pyinstaller --clean --onefile --name swahilipro swa_cli.py
 
-      - name: Verify standalone binary
+      - name: Verify standalone binaries
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
-            ./dist/swa.exe --version
+            ./dist/swa.exe -v
+            ./dist/swahilipro.exe -v
+            ./dist/swa.exe -help >/dev/null
+            ./dist/swahilipro.exe -help >/dev/null
           else
-            ./dist/swa --version
+            ./dist/swa -v
+            ./dist/swahilipro -v
+            ./dist/swa -help >/dev/null
+            ./dist/swahilipro -help >/dev/null
           fi
 
-      - name: Give artifact a platform-specific filename
+      - name: Give artifacts platform-specific filenames
         shell: python
         run: |
           import os
@@ -55,19 +64,24 @@ jobs:
           from pathlib import Path
 
           suffix = ".exe" if os.name == "nt" else ""
-          source = Path("dist") / f"swa{suffix}"
           system = platform.system().lower()
           machine = platform.machine().lower().replace("amd64", "x86_64")
-          target = Path("dist") / f"swa-{system}-{machine}{suffix}"
-          shutil.copy2(source, target)
-          print(target)
 
-      - name: Upload standalone binary
+          for command in ("swa", "swahilipro"):
+              source = Path("dist") / f"{command}{suffix}"
+              target = Path("dist") / f"{command}-{system}-{machine}{suffix}"
+              shutil.copy2(source, target)
+              print(target)
+
+      - name: Upload standalone binaries
         uses: actions/upload-artifact@v4
         with:
-          name: swa-${{ runner.os }}-${{ runner.arch }}
+          name: swahilipro-cli-${{ runner.os }}-${{ runner.arch }}
           path: |
             dist/swa-linux-*
             dist/swa-windows-*.exe
             dist/swa-darwin-*
+            dist/swahilipro-linux-*
+            dist/swahilipro-windows-*.exe
+            dist/swahilipro-darwin-*
           if-no-files-found: error
