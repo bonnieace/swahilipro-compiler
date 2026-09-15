@@ -4,7 +4,10 @@ Canonical usage:
     swa hello.swa
     swa
     swa repl
-    swa --version
+    swa -v
+    swa -help
+
+The `swahilipro` command is an equivalent alias for `swa`.
 """
 from __future__ import annotations
 
@@ -18,17 +21,36 @@ import swahilipro
 
 VERSION = "2.0.0-dev"
 
-BANNER_LINES = (
-    "   ____  " + "  _    _ " + "   ____   " + "_      " + " _  " + " _    " + " _  ",
-    " / ___|  " + " | |  | |" + "  / __ \\ " + "| |     " + "| | " + "| |   " + "| | ",
-    "| |___   " + " | |  | |" + " / / _` |" + "| |___  " + "| | " + "| |   " + "| | ",
-    " \\___ \\ " + " | |/\\| |" + "| | (_| |" + "|  __ | " + "| | " + "| |   " + "| | ",
-    "  ___)|  " + " \\  /\\  /" + " \\ \\__,_|" + "| | | | " + "| | " + "| |__ " + "| | ",
-    " |____/  " + "  \\/  \\/ " + "  \\____/ " + "|_| |_| " + "|_| " + "|____|" + "|_| ",
-)
+BANNER_WORD = "SWAHILIPRO"
+BANNER_GLYPHS = {
+    "S": ("#####", "#    ", "#    ", "#####", "    #", "    #", "#####"),
+    "W": ("#   #", "#   #", "#   #", "# # #", "# # #", "## ##", "#   #"),
+    "A": (" ### ", "#   #", "#   #", "#####", "#   #", "#   #", "#   #"),
+    "H": ("#   #", "#   #", "#   #", "#####", "#   #", "#   #", "#   #"),
+    "I": ("#####", "  #  ", "  #  ", "  #  ", "  #  ", "  #  ", "#####"),
+    "L": ("#    ", "#    ", "#    ", "#    ", "#    ", "#    ", "#####"),
+    "P": ("#### ", "#   #", "#   #", "#### ", "#    ", "#    ", "#    "),
+    "R": ("#### ", "#   #", "#   #", "#### ", "# #  ", "#  # ", "#   #"),
+    "O": (" ### ", "#   #", "#   #", "#   #", "#   #", "#   #", " ### "),
+}
 
 YELLOW = "\033[93m"
 RESET = "\033[0m"
+HELP_FLAGS = {"-h", "--help", "-help"}
+COMMAND_NAMES = {"swa", "swahilipro"}
+
+
+def _command_name() -> str:
+    name = Path(sys.argv[0]).stem.lower()
+    return name if name in COMMAND_NAMES else "swa"
+
+
+def _banner_lines() -> tuple[str, ...]:
+    rows = len(BANNER_GLYPHS["S"])
+    return tuple(
+        "  ".join(BANNER_GLYPHS[letter][row] for letter in BANNER_WORD)
+        for row in range(rows)
+    )
 
 
 def _print_error(error) -> None:
@@ -40,17 +62,17 @@ def _terminal_supports_color() -> bool:
     return sys.stdout.isatty() and "NO_COLOR" not in os.environ
 
 
-def _print_banner() -> None:
-    """Restore the original SwahiliPro shell identity for the canonical REPL."""
+def _print_banner(*, animate: bool | None = None) -> None:
+    """Print a fixed-width SwahiliPro banner without the old alignment drift."""
     use_color = _terminal_supports_color()
     prefix = YELLOW if use_color else ""
     suffix = RESET if use_color else ""
-    animate = sys.stdout.isatty()
+    should_animate = sys.stdout.isatty() if animate is None else animate
 
-    for line in BANNER_LINES:
+    for line in _banner_lines():
         print(f"{prefix}{line}{suffix}")
-        if animate:
-            time.sleep(0.06)
+        if should_animate:
+            time.sleep(0.045)
 
 
 def execute_source(filename: str, source: str, *, echo_result: bool = False) -> int:
@@ -63,19 +85,20 @@ def execute_source(filename: str, source: str, *, echo_result: bool = False) -> 
     return 0
 
 
-def run_file(filename: str) -> int:
+def run_file(filename: str, *, command: str | None = None) -> int:
+    command = command or _command_name()
     path = Path(filename).expanduser()
     if not path.exists():
-        print(f"swa: faili halijapatikana: {filename}", file=sys.stderr)
+        print(f"{command}: faili halijapatikana: {filename}", file=sys.stderr)
         return 2
     if not path.is_file():
-        print(f"swa: si faili: {filename}", file=sys.stderr)
+        print(f"{command}: si faili: {filename}", file=sys.stderr)
         return 2
 
     try:
         source = path.read_text(encoding="utf-8")
     except OSError as exc:
-        print(f"swa: imeshindwa kusoma '{filename}': {exc}", file=sys.stderr)
+        print(f"{command}: imeshindwa kusoma '{filename}': {exc}", file=sys.stderr)
         return 2
 
     return execute_source(str(path), source)
@@ -111,7 +134,8 @@ def _brace_delta(line: str) -> int:
     return delta
 
 
-def repl() -> int:
+def repl(*, command: str | None = None) -> int:
+    command = command or _command_name()
     _print_banner()
     print(f"SwahiliPro {VERSION}")
     print("Andika 'toka' kuondoka. Ctrl+C husitisha mstari wa sasa.")
@@ -120,7 +144,7 @@ def repl() -> int:
     depth = 0
 
     while True:
-        prompt = "... " if buffer else "swa> "
+        prompt = "... " if buffer else f"{command}> "
         try:
             line = input(prompt)
         except EOFError:
@@ -141,7 +165,7 @@ def repl() -> int:
         if depth > 0:
             continue
         if depth < 0:
-            print("swa: '}' ya ziada imepatikana", file=sys.stderr)
+            print(f"{command}: '}}' ya ziada imepatikana", file=sys.stderr)
             buffer.clear()
             depth = 0
             continue
@@ -153,30 +177,50 @@ def repl() -> int:
         execute_source("<repl>", source, echo_result=True)
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(*, prog: str | None = None) -> argparse.ArgumentParser:
+    command = prog or _command_name()
     parser = argparse.ArgumentParser(
-        prog="swa",
+        prog=command,
+        add_help=False,
         description="SwahiliPro compiler and runtime",
-        epilog="Mifano: swa hello.swa | swa | swa repl | swa --version",
+        epilog=(
+            f"Mifano: {command} hello.swa | {command} | {command} repl | "
+            f"{command} -v | {command} -help"
+        ),
+    )
+    parser.add_argument(
+        "-h",
+        "--help",
+        "-help",
+        action="help",
+        help="Onyesha msaada huu na utoke.",
+    )
+    parser.add_argument(
+        "-v",
+        "--version",
+        action="version",
+        version=f"SwahiliPro {VERSION}",
+        help="Onyesha toleo la SwahiliPro na utoke.",
     )
     parser.add_argument(
         "target",
         nargs="?",
         help="Faili la .swa la kuendesha. Tumia 'repl' kufungua REPL.",
     )
-    parser.add_argument(
-        "--version",
-        action="version",
-        version=f"SwahiliPro {VERSION}",
-    )
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    command = prog or _command_name()
+    arguments = list(sys.argv[1:] if argv is None else argv)
+
+    if any(flag in HELP_FLAGS for flag in arguments):
+        _print_banner(animate=False)
+
+    args = build_parser(prog=command).parse_args(arguments)
     if args.target is None or args.target.lower() == "repl":
-        return repl()
-    return run_file(args.target)
+        return repl(command=command)
+    return run_file(args.target, command=command)
 
 
 if __name__ == "__main__":
