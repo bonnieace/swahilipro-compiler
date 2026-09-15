@@ -66,6 +66,28 @@ def test_check_valid_source_is_silent(tmp_path, capsys):
     assert captured.err == ""
 
 
+def test_check_accepts_if_else_if_sample_from_editor(tmp_path, capsys):
+    source = tmp_path / "conditions.swa"
+    source.write_text(
+        "acha nchi = 'kenya'\n"
+        "\n"
+        "ikiwa (nchi == 'kenya'){\n"
+        "    andika('one term')\n"
+        "}\n"
+        "au ikiwa (nchi !='kenya'){\n"
+        "    andika('two term')\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    code = swa_cli.main(["check", str(source)])
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert captured.out == ""
+    assert captured.err == ""
+
+
 def test_check_reports_source_line_and_pointer(tmp_path, capsys):
     source = tmp_path / "broken.swa"
     source.write_text('acha jina = "Amina"\n@\n', encoding="utf-8")
