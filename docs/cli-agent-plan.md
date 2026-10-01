@@ -2,13 +2,13 @@
 
 Status: proposed; documentation only.
 Date: 2026-09-30.
+Revised 2026-10-01 for Firebase Authentication, Firestore, and Next.js client authorization.
 Inspected main commit: 613441bfe21e10c9b0b6f686ef7fa918150e5cd4.
 Companion architecture: https://github.com/bonnieace/swahilipro_web/blob/docs/agent-platform-plan/docs/agent-platform-plan.md
-Aligned companion plan blob: db8b790991d52babca95ff550221d492492aa001.
 
 ## Outcome
 
-Extend the existing standalone swa CLI with browser login, shared account credits, streamed chat, and a local coding-agent loop. Use the Next.js gateway for every paid model call and self-hosted Supabase for identity. Keep the Python runtime usable offline without an account. Build the agent once in Python and expose a structured process interface that the VS Code extension can later consume.
+Extend the existing standalone swa CLI with browser login, shared account credits, streamed chat, and a local coding-agent loop. Use the Next.js gateway for every paid model call and Firebase Authentication for website identity. Keep the Python runtime usable offline without an account. Build the agent once in Python and expose a structured process interface that the VS Code extension can later consume.
 
 This delivers familiar coding-agent workflows; it does not assume parity with Codex or Claude Code without task-based evaluation.
 
@@ -31,11 +31,11 @@ This is source inspection; no runtime tests or live authentication/model request
 
 ## Ownership and architecture
 
-- Supabase owns web identities and the verified OAuth authorization/token lifecycle.
+- Firebase Auth owns website identities; Next.js owns the explicit native-client login-attempt, grant and token lifecycle defined by the web plan.
 - Next.js owns account permissions, model policies, credit reservation/settlement, and Bedrock adapters.
 - The CLI owns terminal interaction, local context, approvals, file operations, process execution, and session history.
 - The extension will own its UI, SecretStorage, and editor-specific approval surfaces, using the same packaged agent engine.
-- Do not ship AWS credentials, Supabase service-role keys, database connections, or an OAuth client secret in the binary. No direct Bedrock or credit-table writes in the initial CLI.
+- Do not ship AWS credentials, Firebase Admin credentials, database connections, or an OAuth client secret in the binary. No direct Bedrock or credit-table writes in the initial CLI.
 
 Add a swa_agent Python package with these boundaries:
 
@@ -43,7 +43,7 @@ Add a swa_agent Python package with these boundaries:
 | --- | --- |
 | commands.py | login/logout/whoami/credits/models/chat/sessions dispatch |
 | config.py | Trusted API/auth origins, public client ID, user-level settings |
-| auth.py / credentials.py | PKCE browser flow, refresh coordination, OS credential storage |
+| auth.py / credentials.py | Challenge-bound browser approval, refresh coordination, OS credential storage |
 | gateway.py / events.py | Versioned HTTP/SSE contract, request status, stream validation |
 | engine.py | Bounded model/tool loop, cancellation, step and usage limits |
 | context.py | Workspace discovery, selected files, ignore rules, context budget |
@@ -80,15 +80,24 @@ Keep existing runtime exit codes. Define and document new agent exit codes for a
 
 ## Authentication and credentials
 
-Depend on the web plan's self-hosted Supabase compatibility gate: confirm public-client registration, PKCE S256, loopback redirect rules, actual claims, refresh rotation, and revocation using the exact deployed Auth version.
+Website sign-in uses Firebase Authentication. Native clients use SwahiliPro credentials issued by Next.js after explicit browser approval; Firebase is not treated as an OAuth authorization server.
 
-Use a maintained OAuth client implementation selected and pinned during the spike, system browser, random state and verifier, and a bounded loopback listener bound only to loopback. Validate state, exact callback path, and single-use completion; shut down on success, timeout, or cancel. Permit HTTP only for the OAuth loopback callback, never remote API/auth traffic.
+Implement the shared web-plan protocol:
+1. Generate a random verifier; send S256 challenge and public client type/label to /api/v1/auth/client/start.
+2. Retain returned high-entropy polling secret in memory and open the website verification URL. For headless terminals show that URL and the confirmation phrase/code; no callback listener or separate device-OAuth capability is required.
+3. User signs into Firebase in the browser and explicitly approves the matching client request.
+4. Poll at the advertised bounded interval; final completion presents polling secret and verifier. The server atomically consumes the attempt and returns application access/refresh credentials.
+5. Store rotating refresh credential in the OS keychain. Use short-lived access tokens for Next.js product APIs. No Firebase password, service-account key, Firebase refresh token or AWS credential belongs in the CLI.
 
-Keep refresh credentials in Windows Credential Manager, macOS Keychain, or an available Linux secret service via a tested adapter. Reject silent plaintext-keyring fallback; provide an explicitly opted-in restricted-permission fallback only where needed. Keep access tokens in memory where possible. Key credentials by origin and account, coordinate refresh across concurrent processes, and atomically replace rotated tokens.
+Treat this as an application authorization protocol with versioned fixtures, not standard OAuth/PKCE compliance. The challenge binds token retrieval to the initiating client. Test denial, expiry, stolen URL, wrong verifier, repeated completion, rate limiting, and cancellation. No access/refresh secret appears in a URL or process arguments.
 
-Only trusted user-level configuration can change API/auth origins. Repository content cannot redirect tokens to another server. Redact credentials from logs, process arguments, and session files. On offline logout, clear local state and explain that remote revocation remains unconfirmed.
+Use maintained cryptographic/random and HTTP primitives; pin dependencies. Configured API/auth origins are trusted user-level settings only; repository files cannot redirect tokens. Enforce HTTPS and origin constraints on credential-bearing requests.
 
-Device-code/headless login is conditional on server support; defer it if unsupported. Do not invent a browser-token copy/paste relay. Handle server-side revocation and already-issued JWT policy defined by the web plan; fail closed on authorization errors.
+Use Windows Credential Manager, macOS Keychain or an available Linux secret service via a tested adapter. Reject silent plaintext fallback; explicitly opt into a restricted-permission fallback only if needed. Isolate credentials by trusted origin and account. Serialize refresh across processes and follow the server's tested rotation/lost-response policy; replay is not blindly retried.
+
+Portal per-device revocation applies to application grants. Firebase account disable/delete/sign-out-everywhere is coordinated with grant revocation on the server; Firebase refresh revocation alone does not invalidate application tokens. CLI logout clears local credentials and attempts grant revocation; explain when offline revocation is unconfirmed.
+
+The CLI never talks directly to Firestore or changes balances. Backend Firebase Admin verification is for Firebase website credentials; application client tokens use their own server validation. Maintain clear credential types in the contract.
 
 ## Gateway and credits
 
@@ -136,7 +145,7 @@ On resume, recheck workspace hashes, session ownership, authentication, and curr
 
 ## Packaging and release changes
 
-Add pyproject.toml and pinned dependency/build inputs for networking, maintained OAuth support, credential storage, and terminal rendering after compatibility tests. Retain standalone distribution: users should not need Python, pip, or Node. Add PyInstaller hooks/spec configuration for certificates, keychain backends, resources, and dynamically imported dependencies.
+Add pyproject.toml and pinned dependency/build inputs for networking, authorization protocol support, credential storage, and terminal rendering after compatibility tests. Retain standalone distribution: users should not need Python, pip, or Node. Add PyInstaller hooks/spec configuration for certificates, keychain backends, resources, and dynamically imported dependencies.
 
 Update tests.yml, standalone-cli.yml, and release-resilient.yml consistently so all install the same dependency set. Test packaged binaries, not only Python source, on the existing Linux x64, Windows x64, macOS x64/ARM targets. Measure startup and artifact-size changes and keep offline runtime commands fast.
 
@@ -147,13 +156,13 @@ Remove tracked bytecode and add ignore rules as a scoped housekeeping change. Do
 ## Ordered implementation slices
 
 1. **Dispatch and package foundation:** manifest/pins, lazy-loaded package, compatibility dispatch, protocol/schema fixtures, and fake gateway. Acceptance: all existing runtime tests pass and file/check/REPL work without network or auth dependencies being initialized.
-2. **Accounts and read APIs:** gated on web Supabase spike; login/logout/whoami/credits/models with OS credential adapters. Acceptance: cancellation, wrong state, replay, expiry, refresh races, revoked grant, unavailable keychain, and secret-redaction tests.
+2. **Accounts and read APIs:** gated on the web Firebase/client-grant implementation; login/logout/whoami/credits/models with OS credential adapters. Acceptance: cancellation, wrong verifier, stolen verification URL, replay, expiry, refresh races, revoked grant, unavailable keychain, and secret-redaction tests.
 3. **Streamed read-only chat:** gateway adapter, context limits, terminal UI, idempotency journal, and cancellation. Acceptance: fragmented streams, disconnect before/after request ID, quota errors, and restart do not cause a duplicate paid call.
 4. **Local coding tools:** read/search, diff review, atomic patches, approved commands, syntax validation. Acceptance: path traversal/symlink escape, ignored secrets, stale files, denied tool calls, command timeout, and user edits are handled correctly.
 5. **Shared engine protocol and resume:** agent --stdio, host token/approval adapters, persisted sessions, and capability handshake. Acceptance: fake extension host can stream, approve/deny, cancel, restart, and detect version mismatch without automatic tool replay.
 6. **Cross-platform beta release:** all workflows use pinned dependencies; packaged smoke tests and resilient release dry-run; verify one funded staging account with small explicit limits. Evaluate real tasks before expanding access.
 
-Backend dependencies: web accounts/OAuth must precede real login; ledger/model catalog and inference streaming must precede paid chat. Compiler dispatch, fixtures, tools, and protocol can be developed against a fake gateway meanwhile.
+Backend dependencies: web accounts/client authorization must precede real login; ledger/model catalog and inference streaming must precede paid chat. Compiler dispatch, fixtures, tools, and protocol can be developed against a fake gateway meanwhile.
 
 ## Meaningful validation
 
@@ -166,4 +175,4 @@ Backend dependencies: web accounts/OAuth must precede real login; ledger/model c
 
 ## Open implementation decisions
 
-Confirm the public API/auth origins, OAuth client registration and loopback constraints, scope/grant mapping, server stream/recovery contract, credit units, supported model list, keychain fallback policy, and extension protocol capabilities. The web plan owns Supabase/Coolify operations and financial rules; this repository owns the local agent and standalone distribution.
+Confirm the public API/auth origins, client-start/approval/completion schemas, polling/expiry and rotation semantics, permission/grant mapping, server stream/recovery contract, credit units, supported model list, keychain fallback policy, and extension protocol capabilities. The web plan owns Firebase/Coolify operations and financial rules; this repository owns the local agent and standalone distribution.
