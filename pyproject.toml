@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "swahilipro"
+version = "2.0.0.dev0"
+requires-python = ">=3.11"
+dynamic = ["dependencies"]
+
+[project.scripts]
+swa = "swa_cli:main"
+swahilipro = "swa_cli:main"
+
+[tool.setuptools]
+packages = ["swa_agent"]
+py-modules = ["swa_cli", "swahilipro", "compat_v2", "environment_v2", "function_v2", "interpreter_v2", "syntax_v2", "strings_with_arrows", "shell"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements-agent.txt"]}

@@ -1,0 +1,13 @@
+{
+  "contractVersion": 1,
+  "backend": "bonnieace/swahilipro_web@c318a6c48590a6d41ef4abdc72578c44ccd02ad6",
+  "login": {"interval": 5, "expiresIn": 600, "confirmationCode": "1234ABCD"},
+  "token": {"tokenType": "Bearer", "expiresIn": 900},
+  "events": [
+    {"version": 1, "type": "request.started", "reservation": 40},
+    {"version": 1, "type": "text.delta", "text": "Habari 👋"},
+    {"version": 1, "type": "usage", "inputTokens": 5, "outputTokens": 2, "actual": 16},
+    {"version": 1, "type": "request.completed", "inputTokens": 5, "outputTokens": 2, "actual": 16}
+  ],
+  "request": {"state": "settled", "reservation": 40, "actual": 16, "responseRetained": false}
+}
