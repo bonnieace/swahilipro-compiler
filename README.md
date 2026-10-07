@@ -288,3 +288,8 @@ The optional CLI account/chat integration is documented in
 Next.js backend and an OS keychain. Existing SwahiliPro execution and syntax checks
 remain offline. Start with `swa configure --api-origin https://YOUR-DEPLOYED-HOST`,
 then `swa login`, `swa models`, and `swa chat --model MODEL_ID`.
+
+Explicit reviewed local tools and the editor-host interface are described in
+[Engine protocol](docs/engine-protocol.md). Use `swa tool --help` or launch the
+versioned host interface with `swa agent --stdio`. Chat remains text-only; generated
+text never authorizes edits or commands.
