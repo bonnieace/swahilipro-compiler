@@ -199,3 +199,7 @@ including an unsaved host buffer read. The four-platform CI build runs this afte
 existing compiler/account smoke tests. Local builds/tests validate Linux; Windows
 and macOS CI/runtime behavior and real VS Code WorkspaceEdit/SecretStorage integration
 remain deployment gates. No release/Marketplace publication is implied.
+
+The CLI account origin defaults to https://swahilipro.com when no user configuration
+exists. `swa configure --api-origin https://YOUR-STAGING-HOST` still selects a
+user-owned override; malformed existing settings are never silently ignored.
