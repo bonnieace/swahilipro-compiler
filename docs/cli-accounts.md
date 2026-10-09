@@ -4,8 +4,9 @@ This implements the dispatch/account/read-only chat slices of the CLI agent plan
 The interpreter, REPL, check command, help/version aliases and stdin execution work
 offline. Agent modules load only for an exact account/chat command. `swa run PATH`
 is the explicit file form when a file is named `chat`, `login`, etc.; `./chat` also
-works. No file editing, command execution, workspace upload, session resume or
-extension stdio host protocol is implemented in this slice.
+works. Chat remains text-only. Explicit local tools and the editor stdio interface
+are documented in [Engine protocol](engine-protocol.md); autonomous orchestration
+and session resume remain future work.
 
 ## Setup
 

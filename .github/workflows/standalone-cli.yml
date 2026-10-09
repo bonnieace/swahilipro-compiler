@@ -39,6 +39,7 @@ jobs:
         run: |
           python scripts/build_cli.py
           python scripts/smoke_cli.py
+          python scripts/smoke_engine.py
 
       - name: Verify standalone binaries
         shell: bash

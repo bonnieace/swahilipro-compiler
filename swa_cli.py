@@ -240,6 +240,12 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     command = prog or _command_name()
     arguments = list(sys.argv[1:] if argv is None else argv)
 
+    if arguments and arguments[0] == 'agent':
+        from swa_agent.protocol import main as protocol_main
+        return protocol_main(arguments[1:], VERSION)
+    if arguments and arguments[0] == 'tool':
+        from swa_agent.tool_commands import main as tool_main
+        return tool_main(arguments[1:], command)
     # Exact names only: ./chat remains a source file; imports stay lazy.
     if arguments and arguments[0] in {'configure', 'login', 'logout', 'whoami', 'credits', 'models', 'chat', 'request'}:
         from swa_agent.commands import main as agent_main

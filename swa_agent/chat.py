@@ -11,8 +11,9 @@ def request_id(uid, key):
 
 
 class Chat:
-    def __init__(self, gateway, auth, directory):
+    def __init__(self, gateway, auth, directory, expected_uid=None):
         self.gateway, self.auth = gateway, auth
+        self.expected_uid = expected_uid
         self.directory = private_dir(directory / 'requests')
 
     def send(self, messages, model, max_output, emit):
@@ -29,6 +30,8 @@ class Chat:
         uid = identity.get('uid')
         if not isinstance(uid, str) or not uid:
             raise AgentError('invalid_account_response', 3)
+        if self.expected_uid is not None and uid != self.expected_uid:
+            raise AgentError('host_account_changed', 3)
         key = secrets.token_urlsafe(24)
         rid = request_id(uid, key)
         path = self.directory / (rid + '.json')
@@ -85,7 +88,8 @@ class Chat:
             raise AgentError('request_receipt_not_found', 2)
         token = self.auth.token()
         identity = self.gateway.json('GET', '/api/v1/me', token=token)
-        if identity.get('uid') != receipt.get('uid'):
+        if (identity.get('uid') != receipt.get('uid') or
+                (self.expected_uid is not None and identity.get('uid') != self.expected_uid)):
             raise AgentError('request_belongs_to_another_account', 3)
         result = self.gateway.json('GET', '/api/v1/requests/' + rid, token=token)
         return result

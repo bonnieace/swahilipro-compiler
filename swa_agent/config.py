@@ -8,6 +8,8 @@ import tempfile
 from urllib.parse import urlsplit
 from .errors import AgentError
 
+DEFAULT_API_ORIGIN = "https://swahilipro.com"
+
 
 def origin(value):
     try:
@@ -82,7 +84,9 @@ class Settings:
 
     def load_origin(self):
         row = read_json(self.root / 'config.json')
-        if not row or row.get('version') != 1:
+        if row is None:
+            return DEFAULT_API_ORIGIN
+        if row.get('version') != 1:
             raise AgentError('run_swa_configure_with_your_api_origin', 2)
         return origin(row.get('origin', ''))
 
