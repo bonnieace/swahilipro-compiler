@@ -209,7 +209,9 @@ def build_parser(*, prog: str | None = None) -> argparse.ArgumentParser:
         description="SwahiliPro compiler and runtime",
         epilog=(
             f"Mifano: {command} hello.swa | {command} | {command} repl | "
-            f"{command} -v | {command} -help | {command} check hello.swa"
+            f"{command} -v | {command} -help | {command} check hello.swa. "
+            "Accounts: configure, login, logout, whoami, credits, models. "
+            "Chat: chat --model ID; recovery: request ID; file: run PATH."
         ),
     )
     parser.add_argument(
@@ -238,6 +240,16 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     command = prog or _command_name()
     arguments = list(sys.argv[1:] if argv is None else argv)
 
+    # Exact names only: ./chat remains a source file; imports stay lazy.
+    if arguments and arguments[0] in {'configure', 'login', 'logout', 'whoami', 'credits', 'models', 'chat', 'request'}:
+        from swa_agent.commands import main as agent_main
+        return agent_main(arguments, prog=command)
+    if arguments and arguments[0] == 'run':
+        if len(arguments) != 2:
+            print(f"Usage: {command} run <file|->", file=sys.stderr)
+            return 2
+        return run_file(arguments[1], command=command)
+
     if any(flag in HELP_FLAGS for flag in arguments):
         _print_banner(animate=False)
 
@@ -255,3 +267,4 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

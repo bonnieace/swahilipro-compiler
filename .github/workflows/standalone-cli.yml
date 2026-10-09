@@ -29,7 +29,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install build dependencies
-        run: python -m pip install --upgrade pip pytest pyinstaller
+        run: python -m pip install -r requirements-build.txt -c constraints.txt
 
       - name: Run tests
         run: python -m pytest -q
@@ -37,8 +37,8 @@ jobs:
       - name: Build standalone CLI aliases
         shell: bash
         run: |
-          pyinstaller --clean --onefile --name swa swa_cli.py
-          pyinstaller --clean --onefile --name swahilipro swa_cli.py
+          python scripts/build_cli.py
+          python scripts/smoke_cli.py
 
       - name: Verify standalone binaries
         shell: bash
@@ -85,3 +85,4 @@ jobs:
             dist/swahilipro-windows-*.exe
             dist/swahilipro-darwin-*
           if-no-files-found: error
+

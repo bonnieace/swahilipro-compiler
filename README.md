@@ -279,3 +279,12 @@ The standalone `swa` binary is the shared runtime artifact for the CLI and edito
 ## Design direction
 
 SwahiliPro v2 intentionally avoids translating punctuation or inventing Swahili replacements for concepts programmers already recognize. The language should require as little explanation as possible while still reading naturally in Swahili.
+
+
+## Account and AI chat preview
+
+The optional CLI account/chat integration is documented in
+[CLI accounts and text chat](docs/cli-accounts.md). It requires the companion
+Next.js backend and an OS keychain. Existing SwahiliPro execution and syntax checks
+remain offline. Start with `swa configure --api-origin https://YOUR-DEPLOYED-HOST`,
+then `swa login`, `swa models`, and `swa chat --model MODEL_ID`.
