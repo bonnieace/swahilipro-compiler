@@ -21,7 +21,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: marketplace-${{ inputs.version }}
+  group: marketplace-masota
   cancel-in-progress: false
 
 env:
@@ -103,7 +103,7 @@ jobs:
     name: Publish ${{ matrix.target }}
     needs: preflight
     strategy:
-      fail-fast: false
+      fail-fast: true
       max-parallel: 1
       matrix:
         target:
@@ -115,6 +115,8 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -151,7 +153,7 @@ jobs:
           while [ "$ATTEMPT" -le "$MAX_ATTEMPTS" ]; do
             echo "Publishing $VSIX with Microsoft Entra identity (attempt $ATTEMPT/$MAX_ATTEMPTS)"
             set +e
-            OUTPUT="$(vsce publish --packagePath "$VSIX" --azure-credential --skip-duplicate 2>&1)"
+            OUTPUT="$(NODE_OPTIONS="--require=$GITHUB_WORKSPACE/scripts/marketplace-diagnostics.cjs" vsce publish --packagePath "$VSIX" --azure-credential --skip-duplicate 2>&1)"
             STATUS=$?
             set -e
             printf '%s\n' "$OUTPUT"
@@ -159,6 +161,11 @@ jobs:
             if [ "$STATUS" -eq 0 ]; then
               echo "Published or already present: ${{ matrix.target }}"
               exit 0
+            fi
+
+            if printf '%s\\n' "$OUTPUT" | grep -Eiq 'RequestBlockedException|VSID|too many requests|"status":429'; then
+              echo "Microsoft throttled publishing. Stop here; inspect marketplace-diagnostic headers before retrying." >&2
+              exit "$STATUS"
             fi
 
             TRANSIENT_PATTERN='request timeout|timed out|timeout|ETIMEDOUT|ESOCKETTIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|EPIPE|socket hang up|connection reset|fetch failed|temporary failure|temporarily unavailable|service unavailable|bad gateway|gateway timeout|internal server error|too many requests|rate limit|HTTP[^0-9]*(408|425|429|500|502|503|504)|status[^0-9]*(408|425|429|500|502|503|504)'
@@ -172,7 +179,7 @@ jobs:
               exit "$STATUS"
             fi
 
-            WAIT_SECONDS=$((15 * (1 << (ATTEMPT - 1))))
+            WAIT_SECONDS=$((120 * (1 << (ATTEMPT - 1))))
             echo "Transient Marketplace/network failure detected. Retrying in ${WAIT_SECONDS}s."
             sleep "$WAIT_SECONDS"
             ATTEMPT=$((ATTEMPT + 1))
