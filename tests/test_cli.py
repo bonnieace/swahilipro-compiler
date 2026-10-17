@@ -51,7 +51,8 @@ def test_help_flags_show_branded_help(flag, capsys):
     captured = capsys.readouterr()
     assert exc.value.code == 0
     assert "usage: swahilipro" in captured.out
-    assert "#####" in captured.out
+    assert "/ ___|" in captured.out
+    assert "\\____/" in captured.out
 
 
 def test_check_valid_source_is_silent(tmp_path, capsys):
@@ -79,10 +80,14 @@ def test_check_reports_source_line_and_pointer(tmp_path, capsys):
     assert "^" in captured.err
 
 
-def test_banner_rows_are_fixed_width():
+def test_banner_restores_original_high_detail_style_with_fixed_alignment():
     lines = swa_cli._banner_lines()
-    assert len(lines) == 7
+    assert len(lines) == 6
     assert len({len(line) for line in lines}) == 1
+    assert swa_cli.BANNER_WORD == "SWAHILI"
+    assert any("/ ___|" in line for line in lines)
+    assert any("| |/\\| |" in line for line in lines)
+    assert any("\\____/" in line for line in lines)
 
 
 def test_brace_counter_ignores_strings_and_comments():

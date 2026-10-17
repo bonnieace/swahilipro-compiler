@@ -21,17 +21,60 @@ import swahilipro
 
 VERSION = "2.0.0-dev"
 
-BANNER_WORD = "SWAHILIPRO"
+# Preserve the original SwahiliPro terminal identity: rounded/slashed ASCII
+# lettering rather than the later low-detail block/hash font. Each glyph keeps
+# its original shape, while _banner_lines pads every glyph to a stable width so
+# the middle letters cannot drift into one another on some terminals.
+BANNER_WORD = "SWAHILI"
 BANNER_GLYPHS = {
-    "S": ("#####", "#    ", "#    ", "#####", "    #", "    #", "#####"),
-    "W": ("#   #", "#   #", "#   #", "# # #", "# # #", "## ##", "#   #"),
-    "A": (" ### ", "#   #", "#   #", "#####", "#   #", "#   #", "#   #"),
-    "H": ("#   #", "#   #", "#   #", "#####", "#   #", "#   #", "#   #"),
-    "I": ("#####", "  #  ", "  #  ", "  #  ", "  #  ", "  #  ", "#####"),
-    "L": ("#    ", "#    ", "#    ", "#    ", "#    ", "#    ", "#####"),
-    "P": ("#### ", "#   #", "#   #", "#### ", "#    ", "#    ", "#    "),
-    "R": ("#### ", "#   #", "#   #", "#### ", "# #  ", "#  # ", "#   #"),
-    "O": (" ### ", "#   #", "#   #", "#   #", "#   #", "#   #", " ### "),
+    "S": (
+        "   ____",
+        " / ___|",
+        "| |___ ",
+        " \\___ \\",
+        "  ___)|",
+        " |____/",
+    ),
+    "W": (
+        "  _    _ ",
+        " | |  | |",
+        " | |  | |",
+        " | |/\\| |",
+        " \\  /\\  /",
+        "  \\/  \\/ ",
+    ),
+    "A": (
+        "   ____   ",
+        "  / __ \\ ",
+        " / / _` |",
+        "| | (_| |",
+        " \\ \\__,_|",
+        "  \\____/ ",
+    ),
+    "H": (
+        "_      ",
+        "| |     ",
+        "| |___  ",
+        "|  __ | ",
+        "| | | | ",
+        "|_| |_| ",
+    ),
+    "I": (
+        " _  ",
+        "| | ",
+        "| | ",
+        "| | ",
+        "| | ",
+        "|_| ",
+    ),
+    "L": (
+        " _    ",
+        "| |   ",
+        "| |   ",
+        "| |   ",
+        "| |__ ",
+        "|____|",
+    ),
 }
 
 YELLOW = "\033[93m"
@@ -46,9 +89,17 @@ def _command_name() -> str:
 
 
 def _banner_lines() -> tuple[str, ...]:
+    """Render the original high-detail banner with stable glyph boundaries."""
     rows = len(BANNER_GLYPHS["S"])
+    widths = {
+        letter: max(len(part) for part in BANNER_GLYPHS[letter])
+        for letter in set(BANNER_WORD)
+    }
     return tuple(
-        "  ".join(BANNER_GLYPHS[letter][row] for letter in BANNER_WORD)
+        " ".join(
+            BANNER_GLYPHS[letter][row].ljust(widths[letter])
+            for letter in BANNER_WORD
+        )
         for row in range(rows)
     )
 
@@ -63,7 +114,6 @@ def _terminal_supports_color() -> bool:
 
 
 def _print_banner(*, animate: bool | None = None) -> None:
-    """Print a fixed-width SwahiliPro banner without the old alignment drift."""
     use_color = _terminal_supports_color()
     prefix = YELLOW if use_color else ""
     suffix = RESET if use_color else ""
@@ -72,7 +122,7 @@ def _print_banner(*, animate: bool | None = None) -> None:
     for line in _banner_lines():
         print(f"{prefix}{line}{suffix}")
         if should_animate:
-            time.sleep(0.045)
+            time.sleep(0.075)
 
 
 def execute_source(filename: str, source: str, *, echo_result: bool = False) -> int:
